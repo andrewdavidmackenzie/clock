@@ -5,5 +5,5 @@ authors = ["Héctor Ramón Jiménez <hector0193@gmail.com>", "Andrew Mackenzie <
 edition = "2021"
 
 [dependencies]
-iced = { version = "0.5.2", features = ["canvas", "tokio", "debug"] }
-time = { version = "0.3.5", features = ["local-offset"] }
+iced = { version = "0.9.0", features = ["canvas", "tokio", "debug"] }
+time = { version = "0.3.5", features = ["std", "local-offset"] }
