@@ -6,4 +6,4 @@ edition = "2021"
 
 [dependencies]
 iced = { version = "0.9.0", features = ["canvas", "tokio", "debug"] }
-time = { version = "0.3.5", features = ["std", "local-offset"] }
+chrono = "0.4.24"

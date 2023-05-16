@@ -7,6 +7,8 @@ use iced::{
     Application, Color, Command, Element, Length, Point, Rectangle, Settings,
     Subscription, Theme, Vector,
 };
+use chrono::prelude::*;
+use chrono::{Local};
 
 pub fn main() -> iced::Result {
     Clock::run(Settings {
@@ -16,13 +18,13 @@ pub fn main() -> iced::Result {
 }
 
 struct Clock {
-    now: time::OffsetDateTime,
+    now: chrono::DateTime<Local>,
     clock: Cache,
 }
 
 #[derive(Debug, Clone, Copy)]
 enum Message {
-    Tick(time::OffsetDateTime),
+    Tick(chrono::DateTime<Local>),
 }
 
 impl Application for Clock {
@@ -34,8 +36,7 @@ impl Application for Clock {
     fn new(_flags: ()) -> (Self, Command<Message>) {
         (
             Clock {
-                now: time::OffsetDateTime::now_local()
-                    .unwrap_or_else(|_| time::OffsetDateTime::now_utc()),
+                now: chrono::offset::Local::now(),
                 clock: Default::default(),
             },
             Command::none(),
@@ -75,13 +76,7 @@ impl Application for Clock {
 
     fn subscription(&self) -> Subscription<Message> {
         iced::time::every(std::time::Duration::from_millis(500)).map(|_| {
-            Message::Tick(
-                time::OffsetDateTime::now_local()
-                    .unwrap_or_else(|_| {
-                        println!("Could not get local time");
-                        time::OffsetDateTime::now_utc()
-                    }),
-            )
+            Message::Tick(chrono::offset::Local::now())
         })
     }
 }
@@ -103,15 +98,18 @@ impl<Message> canvas::Program<Message> for Clock {
             let background = Path::circle(center, radius);
             frame.fill(&background, Color::from_rgb8(0x12, 0x93, 0xD8));
 
-            let short_hand =
+            let hour_hand =
                 Path::line(Point::ORIGIN, Point::new(0.0, -0.5 * radius));
 
-            let long_hand =
+            let minute_hand =
                 Path::line(Point::ORIGIN, Point::new(0.0, -0.8 * radius));
 
-            let width = radius / 100.0;
+            let second_hand =
+                Path::line(Point::ORIGIN, Point::new(0.0, -0.9 * radius));
 
-            let thin_stroke = || -> Stroke {
+            let width = radius / 200.0;
+
+            let second_width = || -> Stroke {
                 Stroke {
                     width,
                     style: stroke::Style::Solid(Color::WHITE),
@@ -120,9 +118,18 @@ impl<Message> canvas::Program<Message> for Clock {
                 }
             };
 
-            let wide_stroke = || -> Stroke {
+            let minute_width = || -> Stroke {
                 Stroke {
-                    width: width * 3.0,
+                    width: width * 6.0,
+                    style: stroke::Style::Solid(Color::WHITE),
+                    line_cap: LineCap::Round,
+                    ..Stroke::default()
+                }
+            };
+
+            let hour_width = || -> Stroke {
+                Stroke {
+                    width: width * 11.0,
                     style: stroke::Style::Solid(Color::WHITE),
                     line_cap: LineCap::Round,
                     ..Stroke::default()
@@ -132,18 +139,18 @@ impl<Message> canvas::Program<Message> for Clock {
             frame.translate(Vector::new(center.x, center.y));
 
             frame.with_save(|frame| {
-                frame.rotate(hand_rotation(self.now.hour(), 12));
-                frame.stroke(&short_hand, wide_stroke());
+                frame.rotate(hand_rotation(self.now.naive_local().time().hour() as u8, 12));
+                frame.stroke(&hour_hand, hour_width());
             });
 
             frame.with_save(|frame| {
-                frame.rotate(hand_rotation(self.now.minute(), 60));
-                frame.stroke(&long_hand, wide_stroke());
+                frame.rotate(hand_rotation(self.now.naive_local().time().minute() as u8, 60));
+                frame.stroke(&minute_hand, minute_width());
             });
 
             frame.with_save(|frame| {
-                frame.rotate(hand_rotation(self.now.second(), 60));
-                frame.stroke(&long_hand, thin_stroke());
+                frame.rotate(hand_rotation(self.now.naive_local().time().second() as u8, 60));
+                frame.stroke(&second_hand, second_width());
             })
         });
 
