@@ -15,3 +15,10 @@ You can run it with:
 ```
 cargo run
 ```
+
+### Build notes
+On Raspberry Pi OS I had a problem with `fontconfig` and `pkgcfg`, and had to install these packages related to fonts before I could build:
+
+```
+sudo apt-get install libfreetype6-dev libfontconfig1-dev xclip
+```
