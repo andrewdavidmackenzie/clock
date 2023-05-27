@@ -75,10 +75,18 @@ impl Application for Clock {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        iced::time::every(std::time::Duration::from_millis(500)).map(|_| {
+        iced::time::every(std::time::Duration::from_secs(1)).map(|_| {
             Message::Tick(chrono::offset::Local::now())
         })
     }
+}
+
+// maybe when mouse is hovering on the inside of the face, show current times in this 12h period
+// and when hovering outside, show times in next 12h period, to allow you to click on a time 1h
+// later or 13h later
+enum ClockClick {
+    Center,
+    Face(chrono::DateTime<Local>)
 }
 
 impl<Message> canvas::Program<Message> for Clock {
@@ -93,65 +101,66 @@ impl<Message> canvas::Program<Message> for Clock {
     ) -> Vec<Geometry> {
         let clock = self.clock.draw(bounds.size(), |frame| {
             let center = frame.center();
+            frame.translate(Vector::new(center.x, center.y));
+
             let radius = frame.width().min(frame.height()) / 2.0;
 
-            let background = Path::circle(center, radius);
+            let background = Path::circle(Point::ORIGIN, radius);
             frame.fill(&background, Color::from_rgb8(0x12, 0x93, 0xD8));
 
             let hour_hand =
-                Path::line(Point::ORIGIN, Point::new(0.0, -0.5 * radius));
-
-            let minute_hand =
-                Path::line(Point::ORIGIN, Point::new(0.0, -0.8 * radius));
-
-            let second_hand =
-                Path::line(Point::ORIGIN, Point::new(0.0, -0.9 * radius));
-
-            let width = radius / 200.0;
-
-            let second_width = || -> Stroke {
-                Stroke {
-                    width,
-                    style: stroke::Style::Solid(Color::WHITE),
-                    line_cap: LineCap::Round,
-                    ..Stroke::default()
-                }
-            };
-
-            let minute_width = || -> Stroke {
-                Stroke {
-                    width: width * 6.0,
-                    style: stroke::Style::Solid(Color::WHITE),
-                    line_cap: LineCap::Round,
-                    ..Stroke::default()
-                }
-            };
+                Path::line(Point::ORIGIN, Point::new(0.0, -0.7 * radius));
 
             let hour_width = || -> Stroke {
                 Stroke {
-                    width: width * 11.0,
+                    width: radius / 15.0,
                     style: stroke::Style::Solid(Color::WHITE),
                     line_cap: LineCap::Round,
                     ..Stroke::default()
                 }
             };
-
-            frame.translate(Vector::new(center.x, center.y));
 
             frame.with_save(|frame| {
                 frame.rotate(hand_rotation(self.now.naive_local().time().hour() as u8, 12));
                 frame.stroke(&hour_hand, hour_width());
             });
 
+            let minute_hand =
+                Path::line(Point::ORIGIN, Point::new(0.0, -0.9 * radius));
+
+            let minute_width = || -> Stroke {
+                Stroke {
+                    width: radius / 30.0,
+                    style: stroke::Style::Solid(Color::WHITE),
+                    line_cap: LineCap::Round,
+                    ..Stroke::default()
+                }
+            };
+
             frame.with_save(|frame| {
                 frame.rotate(hand_rotation(self.now.naive_local().time().minute() as u8, 60));
                 frame.stroke(&minute_hand, minute_width());
             });
 
+            let second_hand =
+                Path::line(Point::ORIGIN, Point::new(0.0, -0.95 * radius));
+
+            let second_width = || -> Stroke {
+                Stroke {
+                    width: radius / 200.0,
+                    style: stroke::Style::Solid(Color::WHITE),
+                    line_cap: LineCap::Round,
+                    ..Stroke::default()
+                }
+            };
+
             frame.with_save(|frame| {
                 frame.rotate(hand_rotation(self.now.naive_local().time().second() as u8, 60));
                 frame.stroke(&second_hand, second_width());
-            })
+            });
+
+            let center = Path::circle(Point::ORIGIN, radius / 15.0);
+            frame.fill(&center, Color::from_rgb8(0x92, 0x93, 0xD8));
         });
 
         vec![clock]
