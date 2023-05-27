@@ -1,4 +1,4 @@
-use iced::executor;
+use iced::{executor, mouse};
 use iced::widget::canvas::{
     stroke, Cache, Cursor, Geometry, LineCap, Path, Stroke,
 };
@@ -9,6 +9,19 @@ use iced::{
 };
 use chrono::prelude::*;
 use chrono::{Local};
+
+const CENTER_BUTTON_RADIUS: f32 = 1.0 / 15.0;
+const CLOCK_FACE_RADIUS: f32 = 1.0;
+
+const CENTER_BUTTON_REGION : CircularRegion = { CircularRegion {
+    inner_radius: 0.0,
+    outer_radius: CENTER_BUTTON_RADIUS
+} };
+
+const CLOCK_FACE_REGION : CircularRegion = { CircularRegion {
+    inner_radius: CENTER_BUTTON_RADIUS,
+    outer_radius: CLOCK_FACE_RADIUS,
+} };
 
 pub fn main() -> iced::Result {
     Clock::run(Settings {
@@ -89,6 +102,23 @@ enum ClockClick {
     Face(chrono::DateTime<Local>)
 }
 
+// A Circular region for click detection. We detect clicks
+// - within a circle (from 0.0 out to the circle radius)
+// - from one radius out to another radius (a donut)
+// - from a radius out to infinity
+// These are defined as fractions of the radius of the displayed clock, so they can be constants
+// and will be multiplied by the clock radius at runtime - as it scales to fit window
+struct CircularRegion {
+    inner_radius: f32,
+    outer_radius: f32,
+}
+
+impl CircularRegion {
+    fn contains(&self, position: f32) -> bool {
+        (position > self.inner_radius) && (position < self.outer_radius)
+    }
+}
+
 impl<Message> canvas::Program<Message> for Clock {
     type State = ();
 
@@ -105,7 +135,7 @@ impl<Message> canvas::Program<Message> for Clock {
 
             let radius = frame.width().min(frame.height()) / 2.0;
 
-            let background = Path::circle(Point::ORIGIN, radius);
+            let background = Path::circle(Point::ORIGIN, radius * CLOCK_FACE_RADIUS);
             frame.fill(&background, Color::from_rgb8(0x12, 0x93, 0xD8));
 
             let hour_hand =
@@ -143,7 +173,7 @@ impl<Message> canvas::Program<Message> for Clock {
             });
 
             let second_hand =
-                Path::line(Point::ORIGIN, Point::new(0.0, -0.95 * radius));
+                Path::line(Point::ORIGIN, Point::new(0.0, - 0.95 * radius));
 
             let second_width = || -> Stroke {
                 Stroke {
@@ -159,11 +189,34 @@ impl<Message> canvas::Program<Message> for Clock {
                 frame.stroke(&second_hand, second_width());
             });
 
-            let center = Path::circle(Point::ORIGIN, radius / 15.0);
+            let center = Path::circle(Point::ORIGIN, radius * CENTER_BUTTON_RADIUS);
             frame.fill(&center, Color::from_rgb8(0x92, 0x93, 0xD8));
         });
 
         vec![clock]
+    }
+
+    fn mouse_interaction(
+        &self,
+        _state: &Self::State,
+        bounds: Rectangle,
+        cursor: Cursor,
+    ) -> mouse::Interaction {
+        match cursor.position() {
+            Some(position) => {
+                let radius = bounds.width.min(bounds.height) / 2.0;
+                let cursor_radius = bounds.center().distance(position) / radius;
+
+                if CENTER_BUTTON_REGION.contains(cursor_radius.clone()) {
+                    mouse::Interaction::Crosshair
+                } else if CLOCK_FACE_REGION.contains(cursor_radius) {
+                    mouse::Interaction::NotAllowed
+                } else {
+                    mouse::Interaction::default()
+                }
+            },
+            None => mouse::Interaction::default(),
+        }
     }
 }
 
