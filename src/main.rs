@@ -31,13 +31,13 @@ pub fn main() -> iced::Result {
 }
 
 struct Clock {
-    now: chrono::DateTime<Local>,
+    now: DateTime<Local>,
     clock: Cache,
 }
 
 #[derive(Debug, Clone, Copy)]
 enum Message {
-    Tick(chrono::DateTime<Local>),
+    Tick(DateTime<Local>),
 }
 
 impl Application for Clock {
@@ -49,7 +49,7 @@ impl Application for Clock {
     fn new(_flags: ()) -> (Self, Command<Message>) {
         (
             Clock {
-                now: chrono::offset::Local::now(),
+                now: Local::now(),
                 clock: Default::default(),
             },
             Command::none(),
@@ -89,7 +89,7 @@ impl Application for Clock {
 
     fn subscription(&self) -> Subscription<Message> {
         iced::time::every(std::time::Duration::from_secs(1)).map(|_| {
-            Message::Tick(chrono::offset::Local::now())
+            Message::Tick(Local::now())
         })
     }
 }
@@ -99,7 +99,7 @@ impl Application for Clock {
 // later or 13h later
 enum ClockClick {
     Center,
-    Face(chrono::DateTime<Local>)
+    Face(DateTime<Local>)
 }
 
 // A Circular region for click detection. We detect clicks
@@ -220,8 +220,9 @@ impl<Message> canvas::Program<Message> for Clock {
     }
 }
 
-fn hand_rotation(n: u8, total: u8) -> f32 {
-    let turns = n as f32 / total as f32;
-
-    2.0 * std::f32::consts::PI * turns
+// Calculate an angle (in radians) from a count over a total possible
+// e.g. 30 (minutes) over a total of 60 (minutes) is 50% of 360 degrees, or 180 degrees
+fn hand_rotation(count: u8, total: u8) -> f32 {
+    let rotation_percent = count as f32 / total as f32;
+    2.0 * std::f32::consts::PI * rotation_percent
 }
