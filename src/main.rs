@@ -1,7 +1,5 @@
 use iced::{executor, mouse};
-use iced::widget::canvas::{
-    stroke, Cache, Cursor, Geometry, LineCap, Path, Stroke,
-};
+use iced::widget::canvas::{stroke, Cache, Cursor, Geometry, LineCap, Path, Stroke, Event, event};
 use iced::widget::{canvas, container};
 use iced::{
     Application, Color, Command, Element, Length, Point, Rectangle, Settings,
@@ -9,8 +7,12 @@ use iced::{
 };
 use chrono::prelude::*;
 use chrono::{Local};
+use std::f32::consts::PI;
 
-const CENTER_BUTTON_RADIUS: f32 = 1.0 / 15.0;
+const CENTER_BUTTON_RADIUS: f32 = 0.07;
+const HOUR_HAND_RADIUS: f32 = 0.7;
+const MINUTE_HAND_RADIUS: f32 = 0.9;
+const SECOND_HAND_RADIUS: f32 = 0.95;
 const CLOCK_FACE_RADIUS: f32 = 1.0;
 
 const CENTER_BUTTON_REGION : CircularRegion = { CircularRegion {
@@ -35,18 +37,22 @@ struct Clock {
     clock: Cache,
 }
 
+/// Messages handled by the [Clock] Application
 #[derive(Debug, Clone, Copy)]
-enum Message {
+enum ClockMessage {
     Tick(DateTime<Local>),
+    CenterClick,
+    FaceClick(DateTime<Local>),
+    OuterClick(DateTime<Local>),
 }
 
 impl Application for Clock {
     type Executor = executor::Default;
-    type Message = Message;
+    type Message = ClockMessage;
     type Theme = Theme;
     type Flags = ();
 
-    fn new(_flags: ()) -> (Self, Command<Message>) {
+    fn new(_flags: ()) -> (Self, Command<ClockMessage>) {
         (
             Clock {
                 now: Local::now(),
@@ -60,9 +66,9 @@ impl Application for Clock {
         String::from("Clock")
     }
 
-    fn update(&mut self, message: Message) -> Command<Message> {
+    fn update(&mut self, message: ClockMessage) -> Command<ClockMessage> {
         match message {
-            Message::Tick(local_time) => {
+            ClockMessage::Tick(local_time) => {
                 let now = local_time;
 
                 if now != self.now {
@@ -70,12 +76,15 @@ impl Application for Clock {
                     self.clock.clear();
                 }
             }
+            ClockMessage::CenterClick => {println!("Center click")}
+            ClockMessage::FaceClick(_) => {println!("Face Click")}
+            ClockMessage::OuterClick(_) => {println!("Outer click")}
         }
 
         Command::none()
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<ClockMessage> {
         let canvas = canvas(self as &Self)
             .width(Length::Fill)
             .height(Length::Fill);
@@ -87,19 +96,11 @@ impl Application for Clock {
             .into()
     }
 
-    fn subscription(&self) -> Subscription<Message> {
+    fn subscription(&self) -> Subscription<ClockMessage> {
         iced::time::every(std::time::Duration::from_secs(1)).map(|_| {
-            Message::Tick(Local::now())
+            ClockMessage::Tick(Local::now())
         })
     }
-}
-
-// maybe when mouse is hovering on the inside of the face, show current times in this 12h period
-// and when hovering outside, show times in next 12h period, to allow you to click on a time 1h
-// later or 13h later
-enum ClockClick {
-    Center,
-    Face(DateTime<Local>)
 }
 
 // A Circular region for click detection. We detect clicks
@@ -115,12 +116,42 @@ struct CircularRegion {
 
 impl CircularRegion {
     fn contains(&self, position: f32) -> bool {
-        (position > self.inner_radius) && (position < self.outer_radius)
+        (position >= self.inner_radius) && (position < self.outer_radius)
     }
 }
 
-impl<Message> canvas::Program<Message> for Clock {
+impl canvas::Program<ClockMessage> for Clock {
     type State = ();
+
+    fn update(
+        &self,
+        _state: &mut Self::State,
+        event: Event,
+        bounds: Rectangle,
+        cursor: Cursor,
+    ) -> (event::Status, Option<ClockMessage>) {
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if let Some(position) = cursor.position() {
+                    let radius = bounds.width.min(bounds.height) / 2.0;
+                    let cursor_radius = bounds.center().distance(position) / radius;
+
+                    if CENTER_BUTTON_REGION.contains(cursor_radius.clone()) {
+                        (event::Status::Captured, Some(ClockMessage::CenterClick))
+                    } else if CLOCK_FACE_REGION.contains(cursor_radius) {
+                        let hour = unit_from_position(bounds.center(), position, 12);
+                        (event::Status::Captured, Some(ClockMessage::FaceClick(Local::now())))
+                    } else {
+                        let hour = unit_from_position(bounds.center(), position, 12);
+                        (event::Status::Captured, Some(ClockMessage::OuterClick(Local::now())))
+                    }
+                } else {
+                    (event::Status::Ignored, None)
+                }
+            }
+            _ => (event::Status::Ignored, None),
+        }
+    }
 
     fn draw(
         &self,
@@ -139,7 +170,7 @@ impl<Message> canvas::Program<Message> for Clock {
             frame.fill(&background, Color::from_rgb8(0x12, 0x93, 0xD8));
 
             let hour_hand =
-                Path::line(Point::ORIGIN, Point::new(0.0, -0.7 * radius));
+                Path::line(Point::ORIGIN, Point::new(0.0, - (HOUR_HAND_RADIUS * radius)));
 
             let hour_width = || -> Stroke {
                 Stroke {
@@ -156,7 +187,7 @@ impl<Message> canvas::Program<Message> for Clock {
             });
 
             let minute_hand =
-                Path::line(Point::ORIGIN, Point::new(0.0, -0.9 * radius));
+                Path::line(Point::ORIGIN, Point::new(0.0, -(MINUTE_HAND_RADIUS * radius)));
 
             let minute_width = || -> Stroke {
                 Stroke {
@@ -173,7 +204,7 @@ impl<Message> canvas::Program<Message> for Clock {
             });
 
             let second_hand =
-                Path::line(Point::ORIGIN, Point::new(0.0, - 0.95 * radius));
+                Path::line(Point::ORIGIN, Point::new(0.0, -(SECOND_HAND_RADIUS * radius)));
 
             let second_width = || -> Stroke {
                 Stroke {
@@ -210,7 +241,7 @@ impl<Message> canvas::Program<Message> for Clock {
                 if CENTER_BUTTON_REGION.contains(cursor_radius.clone()) {
                     mouse::Interaction::Crosshair
                 } else if CLOCK_FACE_REGION.contains(cursor_radius) {
-                    mouse::Interaction::NotAllowed
+                    mouse::Interaction::Grabbing
                 } else {
                     mouse::Interaction::default()
                 }
@@ -220,9 +251,75 @@ impl<Message> canvas::Program<Message> for Clock {
     }
 }
 
+// Calculate the unit (hour, minute, second) from a position relative to the center
+// Zero is at top dead center
+fn unit_from_position(center: Point, position: Point, total: u8) -> f32 {
+    let relative_x = position.x - center.x;
+    let relative_y = -(position.y - center.y);
+    println!("Delta X = {}, Delta Y = {}", relative_x, relative_y);
+    let div = relative_y / relative_x;
+    let mut angle = div.atan();
+    if relative_x < 0.0 {
+        angle += PI;
+    }
+    println!("Angle in radians {}", angle);
+    let angle = ((2.5 * PI) - angle) % (2.0 * PI);
+    println!("Corrected angle in radians {}", angle);
+    let rotation_percent = angle / (2.0 * PI);
+    (total.clone() as f32 * rotation_percent * 1000.0).round() / 1000.0
+}
+
 // Calculate an angle (in radians) from a count over a total possible
 // e.g. 30 (minutes) over a total of 60 (minutes) is 50% of 360 degrees, or 180 degrees
 fn hand_rotation(count: u8, total: u8) -> f32 {
     let rotation_percent = count as f32 / total as f32;
     2.0 * std::f32::consts::PI * rotation_percent
+}
+
+#[cfg(test)]
+mod test {
+    use iced::Point;
+    use super::unit_from_position;
+
+    #[test]
+    fn test_unit_0_clock() {
+        assert_eq!(unit_from_position(Point::new(100.0,100.0),
+                                      Point::new(100.0,0.0),
+                                      12), 0.0);
+    }
+
+    #[test]
+    fn test_unit_3_clock() {
+        assert_eq!(unit_from_position(Point::new(100.0,100.0),
+                                      Point::new(200.0,100.0),
+                                      12), 3.0);
+    }
+
+    #[test]
+    fn test_unit_4_clock() {
+        assert_eq!(unit_from_position(Point::new(100.0,100.0),
+                                      Point::new(180.2,146.3),
+                                      12), 4.0);
+    }
+
+    #[test]
+    fn test_unit_6_clock() {
+        assert_eq!(unit_from_position(Point::new(100.0,100.0),
+                                      Point::new(100.0,200.0),
+                                      12), 6.0);
+    }
+
+    #[test]
+    fn test_unit_7_clock() {
+        assert_eq!(unit_from_position(Point::new(100.0,100.0),
+                                      Point::new(53.8, 180.0),
+                                      12), 7.0);
+    }
+
+    #[test]
+    fn test_unit_9_clock() {
+        assert_eq!(unit_from_position(Point::new(100.0,100.0),
+                                      Point::new(0.0,100.0),
+                                      12), 9.0);
+    }
 }
