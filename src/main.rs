@@ -6,7 +6,7 @@ use iced::{
     Subscription, Theme, Vector,
 };
 use chrono::prelude::*;
-use chrono::{Local};
+use chrono::Local;
 use std::f32::consts::PI;
 
 const CENTER_BUTTON_RADIUS: f32 = 0.07;
