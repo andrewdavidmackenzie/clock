@@ -1,0 +1,2 @@
+runner = "ICED_BACKEND=\"tiny-skia\" cargo run"
+#runner = "cargo run"

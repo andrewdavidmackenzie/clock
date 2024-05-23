@@ -1,9 +1,9 @@
 use iced::{executor, mouse};
-use iced::widget::canvas::{stroke, Cache, Cursor, Geometry, LineCap, Path, Stroke, Event, event};
+use iced::widget::canvas::{stroke, Cache, Geometry, LineCap, Path, Stroke, Event, event};
 use iced::widget::{canvas, container};
 use iced::{
-    Application, Color, Command, Element, Length, Point, Rectangle, Settings,
-    Subscription, Theme, Vector,
+    Application, Color, Command, Element, Length, Point, Rectangle, Renderer, Settings,
+    Size, Subscription, Theme, Vector,
 };
 use chrono::prelude::*;
 use chrono::Local;
@@ -28,6 +28,15 @@ const CLOCK_FACE_REGION : CircularRegion = { CircularRegion {
 pub fn main() -> iced::Result {
     Clock::run(Settings {
         antialiasing: true,
+        window: iced::window::Settings {
+            size: Size {
+                width: 1080f32 / 2f32, 
+                height: 1080f32 / 2f32
+            },
+            resizable: false,
+            decorations: false,
+            ..iced::window::Settings::default()
+        },
         ..Settings::default()
     })
 }
@@ -128,7 +137,7 @@ impl canvas::Program<ClockMessage> for Clock {
         _state: &mut Self::State,
         event: Event,
         bounds: Rectangle,
-        cursor: Cursor,
+        cursor: mouse::Cursor,
     ) -> (event::Status, Option<ClockMessage>) {
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
@@ -139,10 +148,10 @@ impl canvas::Program<ClockMessage> for Clock {
                     if CENTER_BUTTON_REGION.contains(cursor_radius.clone()) {
                         (event::Status::Captured, Some(ClockMessage::CenterClick))
                     } else if CLOCK_FACE_REGION.contains(cursor_radius) {
-                        let hour = unit_from_position(bounds.center(), position, 12);
+                        let _hour = unit_from_position(bounds.center(), position, 12);
                         (event::Status::Captured, Some(ClockMessage::FaceClick(Local::now())))
                     } else {
-                        let hour = unit_from_position(bounds.center(), position, 12);
+                        let _hour = unit_from_position(bounds.center(), position, 12);
                         (event::Status::Captured, Some(ClockMessage::OuterClick(Local::now())))
                     }
                 } else {
@@ -156,11 +165,12 @@ impl canvas::Program<ClockMessage> for Clock {
     fn draw(
         &self,
         _state: &Self::State,
+        renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        _cursor: Cursor,
+        _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        let clock = self.clock.draw(bounds.size(), |frame| {
+        let clock = self.clock.draw(renderer, bounds.size(), |frame| {
             let center = frame.center();
             frame.translate(Vector::new(center.x, center.y));
 
@@ -231,7 +241,7 @@ impl canvas::Program<ClockMessage> for Clock {
         &self,
         _state: &Self::State,
         bounds: Rectangle,
-        cursor: Cursor,
+        cursor: mouse::Cursor,
     ) -> mouse::Interaction {
         match cursor.position() {
             Some(position) => {
