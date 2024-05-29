@@ -47,8 +47,12 @@ struct Clock {
 enum ClockMessage {
     Tick(DateTime<Local>),
     CenterClick,
-    FaceClick(DateTime<Local>),
-    OuterClick(DateTime<Local>),
+    FaceClick(f32),
+    OuterClick(f32),
+}
+
+fn hours_and_minutes(time_float: f32) -> (u8, u8) {
+    (time_float as u8, ((time_float - (time_float as u8) as f32) * 60.0) as u8)
 }
 
 impl Application for Clock {
@@ -82,8 +86,14 @@ impl Application for Clock {
                 }
             }
             ClockMessage::CenterClick => {std::process::exit(0)}
-            ClockMessage::FaceClick(time) => {println!("Face Click @{:?}", time)}
-            ClockMessage::OuterClick(time) => {println!("Outer click @{:?}", time)}
+            ClockMessage::FaceClick(time_float) => {
+                let (hours, minutes) = hours_and_minutes(time_float);
+                println!("Face Click {}:{}", hours, minutes);
+            }
+            ClockMessage::OuterClick(time_float) => {
+                let (hours, minutes) = hours_and_minutes(time_float);
+                println!("Outer Click {}:{}", hours, minutes);
+            }
         }
 
         Command::none()
@@ -144,11 +154,11 @@ impl canvas::Program<ClockMessage> for Clock {
                     if CENTER_BUTTON_REGION.contains(cursor_radius) {
                         (event::Status::Captured, Some(ClockMessage::CenterClick))
                     } else if CLOCK_FACE_REGION.contains(cursor_radius) {
-                        let _hour = unit_from_position(bounds.center(), position, 12);
-                        (event::Status::Captured, Some(ClockMessage::FaceClick(Local::now())))
+                        let time_float = unit_from_position(bounds.center(), position, 12);
+                        (event::Status::Captured, Some(ClockMessage::FaceClick(time_float)))
                     } else {
-                        let _hour = unit_from_position(bounds.center(), position, 12);
-                        (event::Status::Captured, Some(ClockMessage::OuterClick(Local::now())))
+                        let time_float = unit_from_position(bounds.center(), position, 12);
+                        (event::Status::Captured, Some(ClockMessage::OuterClick(time_float)))
                     }
                 } else {
                     (event::Status::Ignored, None)
@@ -262,15 +272,12 @@ impl canvas::Program<ClockMessage> for Clock {
 fn unit_from_position(center: Point, position: Point, total: u8) -> f32 {
     let relative_x = position.x - center.x;
     let relative_y = -(position.y - center.y);
-    println!("Delta X = {}, Delta Y = {}", relative_x, relative_y);
     let div = relative_y / relative_x;
     let mut angle = div.atan();
     if relative_x < 0.0 {
         angle += PI;
     }
-    println!("Angle in radians {}", angle);
     let angle = ((2.5 * PI) - angle) % (2.0 * PI);
-    println!("Corrected angle in radians {}", angle);
     let rotation_percent = angle / (2.0 * PI);
     (total as f32 * rotation_percent * 1000.0).round() / 1000.0
 }
