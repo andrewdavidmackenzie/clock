@@ -1,9 +1,9 @@
-use iced::{executor, mouse};
+use iced::{executor, mouse, window};
 use iced::widget::canvas::{stroke, Cache, Geometry, LineCap, Path, Stroke, Event, event};
 use iced::widget::{canvas, container};
 use iced::{
     Application, Color, Command, Element, Length, Point, Rectangle, Renderer, Settings,
-    Size, Subscription, Theme, Vector,
+    Subscription, Theme, Vector,
 };
 use chrono::prelude::*;
 use chrono::Local;
@@ -28,14 +28,10 @@ const CLOCK_FACE_REGION : CircularRegion = { CircularRegion {
 pub fn main() -> iced::Result {
     Clock::run(Settings {
         antialiasing: true,
-        window: iced::window::Settings {
-            size: Size {
-                width: 1080f32 / 2f32, 
-                height: 1080f32 / 2f32
-            },
+        window: window::Settings {
             resizable: false,
             decorations: false,
-            ..iced::window::Settings::default()
+            ..window::Settings::default()
         },
         ..Settings::default()
     })
@@ -67,10 +63,10 @@ impl Application for Clock {
                 now: Local::now(),
                 clock: Default::default(),
             },
-            Command::none(),
+            window::change_mode(window::Id::MAIN, window::Mode::Fullscreen)
         )
     }
-
+    
     fn title(&self) -> String {
         String::from("Clock")
     }
@@ -85,16 +81,16 @@ impl Application for Clock {
                     self.clock.clear();
                 }
             }
-            ClockMessage::CenterClick => {println!("Center click")}
-            ClockMessage::FaceClick(_) => {println!("Face Click")}
-            ClockMessage::OuterClick(_) => {println!("Outer click")}
+            ClockMessage::CenterClick => {std::process::exit(0)}
+            ClockMessage::FaceClick(time) => {println!("Face Click @{:?}", time)}
+            ClockMessage::OuterClick(time) => {println!("Outer click @{:?}", time)}
         }
 
         Command::none()
     }
 
     fn view(&self) -> Element<ClockMessage> {
-        let canvas = canvas(self as &Self)
+        let canvas = canvas(self)
             .width(Length::Fill)
             .height(Length::Fill);
 
@@ -145,7 +141,7 @@ impl canvas::Program<ClockMessage> for Clock {
                     let radius = bounds.width.min(bounds.height) / 2.0;
                     let cursor_radius = bounds.center().distance(position) / radius;
 
-                    if CENTER_BUTTON_REGION.contains(cursor_radius.clone()) {
+                    if CENTER_BUTTON_REGION.contains(cursor_radius) {
                         (event::Status::Captured, Some(ClockMessage::CenterClick))
                     } else if CLOCK_FACE_REGION.contains(cursor_radius) {
                         let _hour = unit_from_position(bounds.center(), position, 12);
@@ -248,7 +244,7 @@ impl canvas::Program<ClockMessage> for Clock {
                 let radius = bounds.width.min(bounds.height) / 2.0;
                 let cursor_radius = bounds.center().distance(position) / radius;
 
-                if CENTER_BUTTON_REGION.contains(cursor_radius.clone()) {
+                if CENTER_BUTTON_REGION.contains(cursor_radius) {
                     mouse::Interaction::Crosshair
                 } else if CLOCK_FACE_REGION.contains(cursor_radius) {
                     mouse::Interaction::Grabbing
@@ -276,14 +272,14 @@ fn unit_from_position(center: Point, position: Point, total: u8) -> f32 {
     let angle = ((2.5 * PI) - angle) % (2.0 * PI);
     println!("Corrected angle in radians {}", angle);
     let rotation_percent = angle / (2.0 * PI);
-    (total.clone() as f32 * rotation_percent * 1000.0).round() / 1000.0
+    (total as f32 * rotation_percent * 1000.0).round() / 1000.0
 }
 
 // Calculate an angle (in radians) from a count over a total possible
 // e.g. 30 (minutes) over a total of 60 (minutes) is 50% of 360 degrees, or 180 degrees
 fn hand_rotation(count: u8, total: u8) -> f32 {
     let rotation_percent = count as f32 / total as f32;
-    2.0 * std::f32::consts::PI * rotation_percent
+    2.0 * PI * rotation_percent
 }
 
 #[cfg(test)]
