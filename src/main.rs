@@ -10,6 +10,11 @@ use chrono::Local;
 use std::f32::consts::PI;
 
 const CENTER_BUTTON_RADIUS: f32 = 0.07;
+const EXIT_BUTTON_WIDTH: f32 = 120.0;
+const EXIT_BUTTON_HEIGHT: f32 = 36.0;
+const EXIT_BUTTON_Y_OFFSET: f32 = 10.0;
+const MODAL_WIDTH: f32 = 200.0;
+const MODAL_HEIGHT: f32 = 100.0;
 const HOUR_HAND_RADIUS: f32 = 0.7;
 const MINUTE_HAND_RADIUS: f32 = 0.9;
 const SECOND_HAND_RADIUS: f32 = 0.95;
@@ -28,6 +33,23 @@ const CLOCK_FACE_REGION : CircularRegion = { CircularRegion {
     inner_radius: CENTER_BUTTON_RADIUS,
     outer_radius: CLOCK_FACE_RADIUS,
 } };
+
+/// Calculate the top-left origin of the exit button given the center point
+fn exit_button_origin(center: Point) -> Point {
+    Point::new(
+        center.x - EXIT_BUTTON_WIDTH / 2.0,
+        center.y - EXIT_BUTTON_HEIGHT / 2.0 + EXIT_BUTTON_Y_OFFSET,
+    )
+}
+
+/// Check if a position is within the exit button bounds
+fn exit_button_contains(center: Point, position: Point) -> bool {
+    let origin = exit_button_origin(center);
+    position.x >= origin.x
+        && position.x <= origin.x + EXIT_BUTTON_WIDTH
+        && position.y >= origin.y
+        && position.y <= origin.y + EXIT_BUTTON_HEIGHT
+}
 
 fn main() -> iced::Result {
     let window_settings = window::Settings {
@@ -48,6 +70,7 @@ fn main() -> iced::Result {
 struct Clock {
     now: DateTime<Local>,
     clock: Cache,
+    menu_open: bool,
 }
 
 /// Messages handled by the [Clock] Application
@@ -55,6 +78,7 @@ struct Clock {
 enum ClockMessage {
     Tick(DateTime<Local>),
     CenterClick,
+    ExitClick,
     Click {
         start_region: ClickRegion,
         end_region: ClickRegion,
@@ -103,6 +127,7 @@ impl Clock {
             Clock {
                 now: Local::now(),
                 clock: Default::default(),
+                menu_open: false,
             },
             Task::none()
         )
@@ -118,7 +143,13 @@ impl Clock {
                     self.clock.clear();
                 }
             }
-            ClockMessage::CenterClick => {std::process::exit(0)}
+            ClockMessage::CenterClick => {
+                self.menu_open = !self.menu_open;
+                self.clock.clear();
+            }
+            ClockMessage::ExitClick => {
+                return iced::exit();
+            }
             ClockMessage::Click { start_region, end_region, start_time, end_time } => {
                 let (start_h, start_m) = hours_and_minutes(start_time);
                 let (end_h, end_m) = hours_and_minutes(end_time);
@@ -181,6 +212,8 @@ struct ClockState {
     cursor_info: Option<CursorInfo>,
     /// When mouse is pressed, stores drag start info
     dragging: Option<DragState>,
+    /// Track if exit button is being pressed (for release-to-activate pattern)
+    exit_button_pressed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -219,6 +252,17 @@ impl canvas::Program<ClockMessage> for Clock {
                     let radius = bounds.width.min(bounds.height) / 2.0;
                     let cursor_radius = center.distance(position) / radius;
 
+                    // Check if menu is open and click is on Exit button
+                    if self.menu_open {
+                        if exit_button_contains(center, position) {
+                            // Track press, exit triggers on release (allows drag-away to cancel)
+                            state.exit_button_pressed = true;
+                            return Some(canvas::Action::request_redraw());
+                        }
+                        // Click outside button closes menu
+                        return Some(canvas::Action::publish(ClockMessage::CenterClick));
+                    }
+
                     if CENTER_BUTTON_REGION.contains(cursor_radius) {
                         Some(canvas::Action::publish(ClockMessage::CenterClick))
                     } else {
@@ -240,6 +284,13 @@ impl canvas::Program<ClockMessage> for Clock {
                 }
             }
             iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                // Suppress hover/tooltip when menu is open
+                if self.menu_open {
+                    state.cursor_info = None;
+                    state.dragging = None;
+                    return Some(canvas::Action::request_redraw());
+                }
+
                 if let Some(position) = cursor.position_in(bounds) {
                     // Use frame-relative center (position_in returns frame-relative coords)
                     let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
@@ -265,9 +316,26 @@ impl canvas::Program<ClockMessage> for Clock {
             }
             iced::Event::Mouse(mouse::Event::CursorLeft) => {
                 state.cursor_info = None;
+                state.exit_button_pressed = false;
                 Some(canvas::Action::request_redraw())
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                // Handle exit button release when menu is open
+                if self.menu_open {
+                    state.dragging = None;
+                    if state.exit_button_pressed {
+                        state.exit_button_pressed = false;
+                        // Check if still inside button on release
+                        if let Some(position) = cursor.position_in(bounds) {
+                            let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
+                            if exit_button_contains(center, position) {
+                                return Some(canvas::Action::publish(ClockMessage::ExitClick));
+                            }
+                        }
+                    }
+                    return None;
+                }
+
                 if let Some(drag_state) = state.dragging.take() {
                     if let Some(position) = cursor.position_in(bounds) {
                         // Use frame-relative center
@@ -439,6 +507,53 @@ impl canvas::Program<ClockMessage> for Clock {
             geometries.push(tooltip);
         }
 
+        // Draw menu popup if open
+        if self.menu_open {
+            let menu = canvas::Cache::default().draw(renderer, bounds.size(), |frame| {
+                let center = frame.center();
+
+                // Modal dimensions
+                let modal_x = center.x - MODAL_WIDTH / 2.0;
+                let modal_y = center.y - MODAL_HEIGHT / 2.0;
+
+                // Draw modal background with rounded corners
+                let modal_bg = Path::rounded_rectangle(
+                    Point::new(modal_x, modal_y),
+                    iced::Size::new(MODAL_WIDTH, MODAL_HEIGHT),
+                    12.0.into(),
+                );
+                frame.fill(&modal_bg, Color::from_rgba8(40, 40, 40, 0.9));
+
+                // Draw border
+                frame.stroke(&modal_bg, Stroke {
+                    width: 2.0,
+                    style: stroke::Style::Solid(Color::from_rgb8(100, 100, 100)),
+                    ..Stroke::default()
+                });
+
+                // Exit button
+                let button_origin = exit_button_origin(center);
+
+                // Draw Exit button background
+                let button_bg = Path::rounded_rectangle(
+                    button_origin,
+                    iced::Size::new(EXIT_BUTTON_WIDTH, EXIT_BUTTON_HEIGHT),
+                    6.0.into(),
+                );
+                frame.fill(&button_bg, Color::from_rgb8(180, 60, 60));
+
+                // Draw Exit button text
+                frame.fill_text(canvas::Text {
+                    content: String::from("Exit"),
+                    position: Point::new(center.x - 18.0, button_origin.y + 10.0),
+                    color: Color::WHITE,
+                    size: iced::Pixels(18.0),
+                    ..canvas::Text::default()
+                });
+            });
+            geometries.push(menu);
+        }
+
         geometries
     }
 
@@ -454,6 +569,14 @@ impl canvas::Program<ClockMessage> for Clock {
                 let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                 let radius = bounds.width.min(bounds.height) / 2.0;
                 let cursor_radius = center.distance(position) / radius;
+
+                // Check if hovering over Exit button when menu is open
+                if self.menu_open {
+                    if exit_button_contains(center, position) {
+                        return mouse::Interaction::Pointer;
+                    }
+                    return mouse::Interaction::default();
+                }
 
                 if state.dragging.is_some() {
                     // Arrow/pointer while dragging (takes priority)
