@@ -70,7 +70,7 @@ fn event_color(index: usize) -> Color {
     colors[index % colors.len()]
 }
 
-const CENTER_BUTTON_RADIUS: f32 = 0.07;
+const CENTER_BUTTON_RADIUS: f32 = 0.05;
 const EXIT_BUTTON_WIDTH: f32 = 120.0;
 const EXIT_BUTTON_HEIGHT: f32 = 36.0;
 const EXIT_BUTTON_Y_OFFSET: f32 = 40.0;
@@ -79,18 +79,18 @@ const LOGIN_BUTTON_HEIGHT: f32 = 36.0;
 const LOGIN_BUTTON_Y_OFFSET: f32 = -5.0;
 const MODAL_WIDTH: f32 = 280.0;
 const MODAL_HEIGHT: f32 = 240.0;
-const HOUR_HAND_RADIUS: f32 = 0.7;
-const MINUTE_HAND_RADIUS: f32 = 0.9;
-const SECOND_HAND_RADIUS: f32 = 0.95;
-const CLOCK_FACE_RADIUS: f32 = 1.0;
+const HOUR_HAND_RADIUS: f32 = 0.5;
+const MINUTE_HAND_RADIUS: f32 = 0.65;
+const SECOND_HAND_RADIUS: f32 = 0.70;
+const CLOCK_FACE_RADIUS: f32 = 0.75;
 
-const TICK_OUTER_RADIUS: f32 = 0.95;
-const HOUR_TICK_INNER_RADIUS: f32 = 0.85;
-const QUARTER_TICK_INNER_RADIUS: f32 = 0.80;
+const TICK_OUTER_RADIUS: f32 = 0.72;
+const HOUR_TICK_INNER_RADIUS: f32 = 0.63;
+const QUARTER_TICK_INNER_RADIUS: f32 = 0.58;
 
 // Event arc constants - drawn outside the clock face
-const EVENT_ARC_INNER_RADIUS: f32 = 1.02;
-const EVENT_ARC_OUTER_RADIUS: f32 = 1.12;
+const EVENT_ARC_INNER_RADIUS: f32 = 0.78;
+const EVENT_ARC_OUTER_RADIUS: f32 = 0.98;
 
 const CENTER_BUTTON_REGION : CircularRegion = { CircularRegion {
     inner_radius: 0.0,
@@ -777,31 +777,51 @@ impl canvas::Program<ClockMessage> for Clock {
 
                     frame.fill(&arc_path, color);
 
-                    // Draw event name at the midpoint of the arc
+                    // Draw event name curved along the arc
                     if let Some(name) = &event.summary {
-                        let mid_angle = (start_a + end_a) / 2.0;
                         let text_radius = radius * (EVENT_ARC_INNER_RADIUS + EVENT_ARC_OUTER_RADIUS) / 2.0;
-                        let text_pos = Point::new(
-                            text_radius * mid_angle.sin(),
-                            -text_radius * mid_angle.cos(),
-                        );
+                        let arc_span = end_a - start_a;
+                        let font_size = 14.0;
+                        let char_width = font_size * 0.6; // Approximate character width
 
-                        // Truncate name if too long
-                        let display_name: String = if name.len() > 15 {
-                            format!("{}…", &name[..14])
+                        // Calculate how many characters fit
+                        let arc_length = arc_span * text_radius;
+                        let max_chars = (arc_length / char_width) as usize;
+
+                        // Truncate name if needed
+                        let display_name: String = if name.len() > max_chars && max_chars > 1 {
+                            format!("{}…", &name[..max_chars.saturating_sub(1).min(name.len())])
                         } else {
                             name.clone()
                         };
 
-                        frame.fill_text(canvas::Text {
-                            content: display_name,
-                            position: text_pos,
-                            color: Color::WHITE,
-                            size: iced::Pixels(10.0),
-                            align_x: iced::alignment::Horizontal::Center.into(),
-                            align_y: iced::alignment::Vertical::Center.into(),
-                            ..canvas::Text::default()
-                        });
+                        // Calculate angle span for text
+                        let text_len = display_name.chars().count();
+                        let total_text_angle = (text_len as f32 * char_width) / text_radius;
+                        let text_start_angle = (start_a + end_a) / 2.0 - total_text_angle / 2.0;
+
+                        // Draw each character along the arc
+                        for (i, ch) in display_name.chars().enumerate() {
+                            let char_angle = text_start_angle + (i as f32 + 0.5) * char_width / text_radius;
+                            let char_pos = Point::new(
+                                text_radius * char_angle.sin(),
+                                -text_radius * char_angle.cos(),
+                            );
+
+                            frame.with_save(|frame| {
+                                frame.translate(Vector::new(char_pos.x, char_pos.y));
+                                frame.rotate(char_angle);
+                                frame.fill_text(canvas::Text {
+                                    content: ch.to_string(),
+                                    position: Point::ORIGIN,
+                                    color: Color::WHITE,
+                                    size: iced::Pixels(font_size),
+                                    align_x: iced::alignment::Horizontal::Center.into(),
+                                    align_y: iced::alignment::Vertical::Center.into(),
+                                    ..canvas::Text::default()
+                                });
+                            });
+                        }
                     }
                 }
             }
