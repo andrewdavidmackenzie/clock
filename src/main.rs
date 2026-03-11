@@ -478,6 +478,8 @@ struct ClockState {
     exit_button_pressed: bool,
     /// Track if login/logout button is being pressed
     login_button_pressed: bool,
+    /// Event being hovered over (name and cursor position)
+    hovered_event: Option<(String, Point)>,
 }
 
 #[derive(Clone, Copy)]
@@ -561,6 +563,7 @@ impl canvas::Program<ClockMessage> for Clock {
                 if self.menu_open {
                     state.cursor_info = None;
                     state.dragging = None;
+                    state.hovered_event = None;
                     return Some(canvas::Action::request_redraw());
                 }
 
@@ -570,6 +573,54 @@ impl canvas::Program<ClockMessage> for Clock {
                     let radius = bounds.width.min(bounds.height) / 2.0;
                     let cursor_radius = center.distance(position) / radius;
                     let time_float = unit_from_position(center, position, 12);
+
+                    // Check if hovering over an event arc
+                    state.hovered_event = None;
+                    if cursor_radius >= EVENT_ARC_INNER_RADIUS && cursor_radius <= EVENT_ARC_OUTER_RADIUS {
+                        let cursor_angle = time_to_angle(
+                            (time_float as u32) % 12,
+                            ((time_float.fract()) * 60.0) as u32,
+                        );
+
+                        // Check each event
+                        let now = self.now;
+                        for event in &self.upcoming_events {
+                            let start_time = event.start.as_ref().and_then(|s| {
+                                s.date_time.as_ref().or(s.date.as_ref()).and_then(|t| parse_event_time(t))
+                            });
+                            let end_time = event.end.as_ref().and_then(|e| {
+                                e.date_time.as_ref().or(e.date.as_ref()).and_then(|t| parse_event_time(t))
+                            });
+
+                            if let (Some(start), Some(end)) = (start_time, end_time) {
+                                let now_plus_12 = now + chrono::Duration::hours(12);
+                                if start > now_plus_12 || end < now {
+                                    continue;
+                                }
+
+                                let display_start = if start < now { now } else { start };
+                                let display_end = if end > now_plus_12 { now_plus_12 } else { end };
+
+                                let start_angle = time_to_angle(display_start.hour(), display_start.minute());
+                                let end_angle = time_to_angle(display_end.hour(), display_end.minute());
+
+                                let (start_a, end_a) = if end_angle < start_angle {
+                                    (start_angle, end_angle + 2.0 * PI)
+                                } else {
+                                    (start_angle, end_angle)
+                                };
+
+                                // Check if cursor angle is within this event's arc
+                                let cursor_a = if cursor_angle < start_a { cursor_angle + 2.0 * PI } else { cursor_angle };
+                                if cursor_a >= start_a && cursor_a <= end_a {
+                                    if let Some(name) = &event.summary {
+                                        state.hovered_event = Some((name.clone(), position));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // Keep tracking during drag, or show tooltip outside center button
                     if state.dragging.is_some() || !CENTER_BUTTON_REGION.contains(cursor_radius) {
@@ -584,11 +635,13 @@ impl canvas::Program<ClockMessage> for Clock {
                     }
                 } else {
                     state.cursor_info = None;
+                    state.hovered_event = None;
                     Some(canvas::Action::request_redraw())
                 }
             }
             iced::Event::Mouse(mouse::Event::CursorLeft) => {
                 state.cursor_info = None;
+                state.hovered_event = None;
                 state.exit_button_pressed = false;
                 state.login_button_pressed = false;
                 Some(canvas::Action::request_redraw())
@@ -923,6 +976,38 @@ impl canvas::Program<ClockMessage> for Clock {
                 });
             });
             geometries.push(tooltip);
+        }
+
+        // Draw event hover tooltip
+        if let Some((event_name, position)) = &state.hovered_event {
+            let event_tooltip = canvas::Cache::default().draw(renderer, bounds.size(), |frame| {
+                let font_size = 16.0;
+                let padding = 8.0;
+                let char_width = font_size * 0.6;
+                let text_width = (event_name.len() as f32 * char_width).max(100.0);
+                let text_height = font_size;
+
+                // Position tooltip near cursor with offset
+                let tooltip_x = position.x + 15.0;
+                let tooltip_y = position.y - 10.0;
+
+                // Draw rounded rectangle background
+                let bg_rect = Path::rounded_rectangle(
+                    Point::new(tooltip_x - padding, tooltip_y - padding),
+                    iced::Size::new(text_width + padding * 2.0, text_height + padding * 2.0),
+                    6.0.into(),
+                );
+                frame.fill(&bg_rect, Color::from_rgba8(0, 0, 0, 0.9));
+
+                frame.fill_text(canvas::Text {
+                    content: event_name.clone(),
+                    position: Point::new(tooltip_x, tooltip_y),
+                    color: Color::WHITE,
+                    size: iced::Pixels(font_size),
+                    ..canvas::Text::default()
+                });
+            });
+            geometries.push(event_tooltip);
         }
 
         // Draw menu popup if open
