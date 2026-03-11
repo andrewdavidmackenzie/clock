@@ -123,6 +123,7 @@ impl Clock {
             }
             ClockMessage::CenterClick => {
                 self.menu_open = !self.menu_open;
+                self.clock.clear();
             }
             ClockMessage::ExitClick => {
                 return iced::exit();
