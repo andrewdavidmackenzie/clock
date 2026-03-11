@@ -1,6 +1,6 @@
 use iced::{mouse, window, Task};
 use iced::widget::canvas::{stroke, Cache, Geometry, LineCap, Path, Stroke};
-use iced::widget::{canvas, container};
+use iced::widget::{canvas, container, image};
 use iced::{
     Color, Element, Length, Point, Rectangle, Renderer,
     Subscription, Theme, Vector,
@@ -11,6 +11,22 @@ use std::f32::consts::PI;
 
 mod google_auth;
 use google_auth::{GoogleAuth, UserInfo};
+
+/// Fetch avatar image from URL asynchronously
+async fn fetch_avatar(url: String) -> Option<image::Handle> {
+    tokio::task::spawn_blocking(move || {
+        let client = reqwest::blocking::Client::new();
+        match client.get(&url).send() {
+            Ok(response) if response.status().is_success() => {
+                match response.bytes() {
+                    Ok(bytes) => Some(image::Handle::from_bytes(bytes.to_vec())),
+                    Err(_) => None,
+                }
+            }
+            _ => None,
+        }
+    }).await.ok().flatten()
+}
 
 const CENTER_BUTTON_RADIUS: f32 = 0.07;
 const EXIT_BUTTON_WIDTH: f32 = 120.0;
@@ -96,6 +112,7 @@ struct Clock {
     menu_open: bool,
     google_auth: Option<GoogleAuth>,
     user_info: Option<UserInfo>,
+    avatar: Option<image::Handle>,
     login_in_progress: bool,
 }
 
@@ -109,6 +126,7 @@ enum ClockMessage {
     LogoutClick,
     LoginComplete(Result<UserInfo, String>),
     SessionRestored(Option<UserInfo>),
+    AvatarLoaded(Option<image::Handle>),
     Click {
         start_region: ClickRegion,
         end_region: ClickRegion,
@@ -194,6 +212,7 @@ impl Clock {
                 menu_open: false,
                 google_auth,
                 user_info: None,
+                avatar: None,
                 login_in_progress: false,
             },
             restore_task
@@ -274,6 +293,7 @@ impl Clock {
                     }
                 }
                 self.user_info = None;
+                self.avatar = None;
                 self.clock.clear();
             }
             ClockMessage::LoginComplete(result) => {
@@ -281,19 +301,42 @@ impl Clock {
                 match result {
                     Ok(user_info) => {
                         println!("Logged in as: {}", user_info.name);
+                        let avatar_url = user_info.picture.clone();
                         self.user_info = Some(user_info);
                         self.menu_open = false; // Close modal on successful login
+                        self.clock.clear();
+                        // Fetch avatar if available
+                        if let Some(url) = avatar_url {
+                            return Task::perform(
+                                fetch_avatar(url),
+                                ClockMessage::AvatarLoaded,
+                            );
+                        }
                     }
                     Err(e) => {
                         eprintln!("Login failed: {}", e);
+                        self.clock.clear();
                     }
                 }
-                self.clock.clear();
             }
             ClockMessage::SessionRestored(user_info) => {
                 if let Some(info) = user_info {
                     println!("Session restored for: {}", info.name);
+                    let avatar_url = info.picture.clone();
                     self.user_info = Some(info);
+                    self.clock.clear();
+                    // Fetch avatar if available
+                    if let Some(url) = avatar_url {
+                        return Task::perform(
+                            fetch_avatar(url),
+                            ClockMessage::AvatarLoaded,
+                        );
+                    }
+                }
+            }
+            ClockMessage::AvatarLoaded(handle) => {
+                if let Some(h) = handle {
+                    self.avatar = Some(h);
                     self.clock.clear();
                 }
             }
@@ -685,6 +728,7 @@ impl canvas::Program<ClockMessage> for Clock {
         // Draw menu popup if open
         if self.menu_open {
             let user_info = self.user_info.clone();
+            let avatar = self.avatar.clone();
             let login_in_progress = self.login_in_progress;
             let has_google_auth = self.google_auth.is_some();
 
@@ -714,10 +758,33 @@ impl canvas::Program<ClockMessage> for Clock {
                 let login_origin = login_button_origin(center);
 
                 if let Some(info) = &user_info {
-                    // User is logged in - show name and logout button
+                    // User is logged in - show avatar, name and logout button
+                    let avatar_size = 48.0;
+                    let avatar_x = center.x - avatar_size / 2.0;
+                    let avatar_y = login_origin.y - 70.0;
+
+                    // Draw avatar if available, otherwise draw placeholder circle
+                    if let Some(ref handle) = avatar {
+                        frame.draw_image(
+                            Rectangle::new(
+                                Point::new(avatar_x, avatar_y),
+                                iced::Size::new(avatar_size, avatar_size),
+                            ),
+                            handle,
+                        );
+                    } else {
+                        // Placeholder circle for avatar
+                        let avatar_circle = Path::circle(
+                            Point::new(center.x, avatar_y + avatar_size / 2.0),
+                            avatar_size / 2.0,
+                        );
+                        frame.fill(&avatar_circle, Color::from_rgb8(80, 80, 80));
+                    }
+
+                    // Draw name below avatar
                     frame.fill_text(canvas::Text {
                         content: info.name.clone(),
-                        position: Point::new(center.x - 60.0, login_origin.y - 25.0),
+                        position: Point::new(center.x - 60.0, login_origin.y - 15.0),
                         color: Color::WHITE,
                         size: iced::Pixels(14.0),
                         ..canvas::Text::default()

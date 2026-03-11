@@ -6,7 +6,7 @@ edition = "2021"
 rust-version = "1.88"
 
 [dependencies]
-iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "tokio", "canvas", "x11", "wayland"] }
+iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "tokio", "canvas", "image", "x11", "wayland"] }
 chrono = "0.4.24"
 
 # Google OAuth/OIDC and Calendar integration
