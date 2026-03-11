@@ -195,6 +195,8 @@ struct ClockState {
     cursor_info: Option<CursorInfo>,
     /// When mouse is pressed, stores drag start info
     dragging: Option<DragState>,
+    /// Track if exit button is being pressed (for release-to-activate pattern)
+    exit_button_pressed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -243,7 +245,9 @@ impl canvas::Program<ClockMessage> for Clock {
                             && position.y >= button_y
                             && position.y <= button_y + EXIT_BUTTON_HEIGHT
                         {
-                            return Some(canvas::Action::publish(ClockMessage::ExitClick));
+                            // Track press, exit triggers on release (allows drag-away to cancel)
+                            state.exit_button_pressed = true;
+                            return Some(canvas::Action::request_redraw());
                         }
                         // Click outside button closes menu
                         return Some(canvas::Action::publish(ClockMessage::CenterClick));
@@ -302,12 +306,30 @@ impl canvas::Program<ClockMessage> for Clock {
             }
             iced::Event::Mouse(mouse::Event::CursorLeft) => {
                 state.cursor_info = None;
+                state.exit_button_pressed = false;
                 Some(canvas::Action::request_redraw())
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                // Suppress drag completion when menu is open
+                // Handle exit button release when menu is open
                 if self.menu_open {
                     state.dragging = None;
+                    if state.exit_button_pressed {
+                        state.exit_button_pressed = false;
+                        // Check if still inside button on release
+                        if let Some(position) = cursor.position_in(bounds) {
+                            let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
+                            let button_x = center.x - EXIT_BUTTON_WIDTH / 2.0;
+                            let button_y = center.y - EXIT_BUTTON_HEIGHT / 2.0 + EXIT_BUTTON_Y_OFFSET;
+
+                            if position.x >= button_x
+                                && position.x <= button_x + EXIT_BUTTON_WIDTH
+                                && position.y >= button_y
+                                && position.y <= button_y + EXIT_BUTTON_HEIGHT
+                            {
+                                return Some(canvas::Action::publish(ClockMessage::ExitClick));
+                            }
+                        }
+                    }
                     return None;
                 }
 
