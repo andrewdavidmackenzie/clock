@@ -9,12 +9,18 @@ use chrono::prelude::*;
 use chrono::Local;
 use std::f32::consts::PI;
 
+mod google_auth;
+use google_auth::{GoogleAuth, UserInfo};
+
 const CENTER_BUTTON_RADIUS: f32 = 0.07;
 const EXIT_BUTTON_WIDTH: f32 = 120.0;
 const EXIT_BUTTON_HEIGHT: f32 = 36.0;
-const EXIT_BUTTON_Y_OFFSET: f32 = 10.0;
-const MODAL_WIDTH: f32 = 200.0;
-const MODAL_HEIGHT: f32 = 100.0;
+const EXIT_BUTTON_Y_OFFSET: f32 = 40.0;
+const LOGIN_BUTTON_WIDTH: f32 = 180.0;
+const LOGIN_BUTTON_HEIGHT: f32 = 36.0;
+const LOGIN_BUTTON_Y_OFFSET: f32 = -30.0;
+const MODAL_WIDTH: f32 = 280.0;
+const MODAL_HEIGHT: f32 = 180.0;
 const HOUR_HAND_RADIUS: f32 = 0.7;
 const MINUTE_HAND_RADIUS: f32 = 0.9;
 const SECOND_HAND_RADIUS: f32 = 0.95;
@@ -51,6 +57,23 @@ fn exit_button_contains(center: Point, position: Point) -> bool {
         && position.y <= origin.y + EXIT_BUTTON_HEIGHT
 }
 
+/// Calculate the top-left origin of the login button given the center point
+fn login_button_origin(center: Point) -> Point {
+    Point::new(
+        center.x - LOGIN_BUTTON_WIDTH / 2.0,
+        center.y - LOGIN_BUTTON_HEIGHT / 2.0 + LOGIN_BUTTON_Y_OFFSET,
+    )
+}
+
+/// Check if a position is within the login button bounds
+fn login_button_contains(center: Point, position: Point) -> bool {
+    let origin = login_button_origin(center);
+    position.x >= origin.x
+        && position.x <= origin.x + LOGIN_BUTTON_WIDTH
+        && position.y >= origin.y
+        && position.y <= origin.y + LOGIN_BUTTON_HEIGHT
+}
+
 fn main() -> iced::Result {
     let window_settings = window::Settings {
         resizable: false,
@@ -71,14 +94,20 @@ struct Clock {
     now: DateTime<Local>,
     clock: Cache,
     menu_open: bool,
+    google_auth: Option<GoogleAuth>,
+    user_info: Option<UserInfo>,
+    login_in_progress: bool,
 }
 
 /// Messages handled by the [Clock] Application
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum ClockMessage {
     Tick(DateTime<Local>),
     CenterClick,
     ExitClick,
+    LoginClick,
+    LogoutClick,
+    LoginComplete(Result<UserInfo, String>),
     Click {
         start_region: ClickRegion,
         end_region: ClickRegion,
@@ -123,11 +152,39 @@ fn next_occurrence_period(time_float: f32, current_time: &DateTime<Local>) -> &'
 
 impl Clock {
     fn new() -> (Self, Task<ClockMessage>) {
+        let google_auth = GoogleAuth::new();
+
+        // Try to restore previous login session
+        let user_info = google_auth.as_ref().and_then(|auth| {
+            auth.load_tokens().and_then(|token| {
+                match auth.get_user_info(&token) {
+                    Ok(info) => {
+                        // Also fetch and print the next calendar event
+                        if let Ok(Some(event)) = auth.get_next_calendar_event(&token) {
+                            if let Some(summary) = &event.summary {
+                                let time = event.start
+                                    .as_ref()
+                                    .and_then(|s| s.date_time.as_ref().or(s.date.as_ref()))
+                                    .map(|s| s.as_str())
+                                    .unwrap_or("unknown time");
+                                println!("Next calendar event: {} at {}", summary, time);
+                            }
+                        }
+                        Some(info)
+                    }
+                    Err(_) => None,
+                }
+            })
+        });
+
         (
             Clock {
                 now: Local::now(),
                 clock: Default::default(),
                 menu_open: false,
+                google_auth,
+                user_info,
+                login_in_progress: false,
             },
             Task::none()
         )
@@ -149,6 +206,76 @@ impl Clock {
             }
             ClockMessage::ExitClick => {
                 return iced::exit();
+            }
+            ClockMessage::LoginClick => {
+                if let Some(auth) = &self.google_auth {
+                    self.login_in_progress = true;
+                    self.clock.clear();
+
+                    let auth = auth.clone();
+                    return Task::perform(
+                        async move {
+                            // This runs the OAuth flow in a blocking manner
+                            tokio::task::spawn_blocking(move || {
+                                match auth.start_login() {
+                                    Ok((auth_url, pkce_verifier)) => {
+                                        // Open browser for user to authenticate
+                                        if webbrowser::open(&auth_url).is_err() {
+                                            return Err("Failed to open browser".to_string());
+                                        }
+
+                                        // Wait for callback and exchange code for token
+                                        match auth.wait_for_callback(pkce_verifier) {
+                                            Ok(access_token) => {
+                                                // Get user info
+                                                match auth.get_user_info(&access_token) {
+                                                    Ok(user_info) => {
+                                                        // Print next calendar event
+                                                        if let Ok(Some(event)) = auth.get_next_calendar_event(&access_token) {
+                                                            if let Some(summary) = &event.summary {
+                                                                let time = event.start
+                                                                    .as_ref()
+                                                                    .and_then(|s| s.date_time.as_ref().or(s.date.as_ref()))
+                                                                    .map(|s| s.as_str())
+                                                                    .unwrap_or("unknown time");
+                                                                println!("Next calendar event: {} at {}", summary, time);
+                                                            }
+                                                        }
+                                                        Ok(user_info)
+                                                    }
+                                                    Err(e) => Err(e),
+                                                }
+                                            }
+                                            Err(e) => Err(e),
+                                        }
+                                    }
+                                    Err(e) => Err(e),
+                                }
+                            }).await.unwrap_or_else(|e| Err(format!("Task failed: {:?}", e)))
+                        },
+                        ClockMessage::LoginComplete,
+                    );
+                }
+            }
+            ClockMessage::LogoutClick => {
+                if let Some(auth) = &self.google_auth {
+                    let _ = auth.clear_tokens();
+                }
+                self.user_info = None;
+                self.clock.clear();
+            }
+            ClockMessage::LoginComplete(result) => {
+                self.login_in_progress = false;
+                match result {
+                    Ok(user_info) => {
+                        println!("Logged in as: {}", user_info.name);
+                        self.user_info = Some(user_info);
+                    }
+                    Err(e) => {
+                        eprintln!("Login failed: {}", e);
+                    }
+                }
+                self.clock.clear();
             }
             ClockMessage::Click { start_region, end_region, start_time, end_time } => {
                 let (start_h, start_m) = hours_and_minutes(start_time);
@@ -214,6 +341,8 @@ struct ClockState {
     dragging: Option<DragState>,
     /// Track if exit button is being pressed (for release-to-activate pattern)
     exit_button_pressed: bool,
+    /// Track if login/logout button is being pressed
+    login_button_pressed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -252,14 +381,19 @@ impl canvas::Program<ClockMessage> for Clock {
                     let radius = bounds.width.min(bounds.height) / 2.0;
                     let cursor_radius = center.distance(position) / radius;
 
-                    // Check if menu is open and click is on Exit button
+                    // Check if menu is open and handle button clicks
                     if self.menu_open {
                         if exit_button_contains(center, position) {
                             // Track press, exit triggers on release (allows drag-away to cancel)
                             state.exit_button_pressed = true;
                             return Some(canvas::Action::request_redraw());
                         }
-                        // Click outside button closes menu
+                        if login_button_contains(center, position) && !self.login_in_progress {
+                            // Track press for login/logout button
+                            state.login_button_pressed = true;
+                            return Some(canvas::Action::request_redraw());
+                        }
+                        // Click outside buttons closes menu
                         return Some(canvas::Action::publish(ClockMessage::CenterClick));
                     }
 
@@ -317,10 +451,11 @@ impl canvas::Program<ClockMessage> for Clock {
             iced::Event::Mouse(mouse::Event::CursorLeft) => {
                 state.cursor_info = None;
                 state.exit_button_pressed = false;
+                state.login_button_pressed = false;
                 Some(canvas::Action::request_redraw())
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                // Handle exit button release when menu is open
+                // Handle button releases when menu is open
                 if self.menu_open {
                     state.dragging = None;
                     if state.exit_button_pressed {
@@ -330,6 +465,22 @@ impl canvas::Program<ClockMessage> for Clock {
                             let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                             if exit_button_contains(center, position) {
                                 return Some(canvas::Action::publish(ClockMessage::ExitClick));
+                            }
+                        }
+                    }
+                    if state.login_button_pressed {
+                        state.login_button_pressed = false;
+                        // Check if still inside button on release
+                        if let Some(position) = cursor.position_in(bounds) {
+                            let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
+                            if login_button_contains(center, position) {
+                                // Determine if this is login or logout based on current state
+                                let message = if self.user_info.is_some() {
+                                    ClockMessage::LogoutClick
+                                } else {
+                                    ClockMessage::LoginClick
+                                };
+                                return Some(canvas::Action::publish(message));
                             }
                         }
                     }
@@ -509,6 +660,10 @@ impl canvas::Program<ClockMessage> for Clock {
 
         // Draw menu popup if open
         if self.menu_open {
+            let user_info = self.user_info.clone();
+            let login_in_progress = self.login_in_progress;
+            let has_google_auth = self.google_auth.is_some();
+
             let menu = canvas::Cache::default().draw(renderer, bounds.size(), |frame| {
                 let center = frame.center();
 
@@ -531,21 +686,88 @@ impl canvas::Program<ClockMessage> for Clock {
                     ..Stroke::default()
                 });
 
+                // Login/Logout section
+                let login_origin = login_button_origin(center);
+
+                if let Some(info) = &user_info {
+                    // User is logged in - show name and logout button
+                    frame.fill_text(canvas::Text {
+                        content: info.name.clone(),
+                        position: Point::new(center.x - 60.0, login_origin.y - 25.0),
+                        color: Color::WHITE,
+                        size: iced::Pixels(14.0),
+                        ..canvas::Text::default()
+                    });
+
+                    // Draw Logout button
+                    let logout_bg = Path::rounded_rectangle(
+                        login_origin,
+                        iced::Size::new(LOGIN_BUTTON_WIDTH, LOGIN_BUTTON_HEIGHT),
+                        6.0.into(),
+                    );
+                    frame.fill(&logout_bg, Color::from_rgb8(100, 100, 100));
+
+                    frame.fill_text(canvas::Text {
+                        content: String::from("Logout"),
+                        position: Point::new(center.x - 28.0, login_origin.y + 10.0),
+                        color: Color::WHITE,
+                        size: iced::Pixels(18.0),
+                        ..canvas::Text::default()
+                    });
+                } else if has_google_auth {
+                    // User is not logged in - show login button
+                    let button_color = if login_in_progress {
+                        Color::from_rgb8(80, 80, 80) // Dimmed while in progress
+                    } else {
+                        Color::from_rgb8(66, 133, 244) // Google blue
+                    };
+
+                    let login_bg = Path::rounded_rectangle(
+                        login_origin,
+                        iced::Size::new(LOGIN_BUTTON_WIDTH, LOGIN_BUTTON_HEIGHT),
+                        6.0.into(),
+                    );
+                    frame.fill(&login_bg, button_color);
+
+                    let button_text = if login_in_progress {
+                        "Logging in..."
+                    } else {
+                        "Login with Google"
+                    };
+
+                    frame.fill_text(canvas::Text {
+                        content: String::from(button_text),
+                        position: Point::new(center.x - 65.0, login_origin.y + 10.0),
+                        color: Color::WHITE,
+                        size: iced::Pixels(16.0),
+                        ..canvas::Text::default()
+                    });
+                } else {
+                    // No Google auth configured
+                    frame.fill_text(canvas::Text {
+                        content: String::from("Google auth not configured"),
+                        position: Point::new(center.x - 95.0, login_origin.y + 5.0),
+                        color: Color::from_rgb8(150, 150, 150),
+                        size: iced::Pixels(12.0),
+                        ..canvas::Text::default()
+                    });
+                }
+
                 // Exit button
-                let button_origin = exit_button_origin(center);
+                let exit_origin = exit_button_origin(center);
 
                 // Draw Exit button background
-                let button_bg = Path::rounded_rectangle(
-                    button_origin,
+                let exit_bg = Path::rounded_rectangle(
+                    exit_origin,
                     iced::Size::new(EXIT_BUTTON_WIDTH, EXIT_BUTTON_HEIGHT),
                     6.0.into(),
                 );
-                frame.fill(&button_bg, Color::from_rgb8(180, 60, 60));
+                frame.fill(&exit_bg, Color::from_rgb8(180, 60, 60));
 
                 // Draw Exit button text
                 frame.fill_text(canvas::Text {
                     content: String::from("Exit"),
-                    position: Point::new(center.x - 18.0, button_origin.y + 10.0),
+                    position: Point::new(center.x - 18.0, exit_origin.y + 10.0),
                     color: Color::WHITE,
                     size: iced::Pixels(18.0),
                     ..canvas::Text::default()
@@ -570,9 +792,12 @@ impl canvas::Program<ClockMessage> for Clock {
                 let radius = bounds.width.min(bounds.height) / 2.0;
                 let cursor_radius = center.distance(position) / radius;
 
-                // Check if hovering over Exit button when menu is open
+                // Check if hovering over buttons when menu is open
                 if self.menu_open {
                     if exit_button_contains(center, position) {
+                        return mouse::Interaction::Pointer;
+                    }
+                    if login_button_contains(center, position) && self.google_auth.is_some() && !self.login_in_progress {
                         return mouse::Interaction::Pointer;
                     }
                     return mouse::Interaction::default();
