@@ -55,8 +55,12 @@ struct Clock {
 enum ClockMessage {
     Tick(DateTime<Local>),
     CenterClick,
-    FaceClick(f32),
-    OuterClick(f32),
+    Click {
+        start_region: ClickRegion,
+        end_region: ClickRegion,
+        start_time: f32,
+        end_time: f32,
+    },
 }
 
 fn hours_and_minutes(time_float: f32) -> (u8, u8) {
@@ -85,13 +89,16 @@ impl Clock {
                 }
             }
             ClockMessage::CenterClick => {std::process::exit(0)}
-            ClockMessage::FaceClick(time_float) => {
-                let (hours, minutes) = hours_and_minutes(time_float);
-                println!("Face Click {}:{}", hours, minutes);
-            }
-            ClockMessage::OuterClick(time_float) => {
-                let (hours, minutes) = hours_and_minutes(time_float);
-                println!("Outer Click {}:{}", hours, minutes);
+            ClockMessage::Click { start_region, end_region, start_time, end_time } => {
+                let (start_h, start_m) = hours_and_minutes(start_time);
+                let (end_h, end_m) = hours_and_minutes(end_time);
+                let drag_type = match (start_region, end_region) {
+                    (ClickRegion::Face, ClickRegion::Face) => "Face",
+                    (ClickRegion::Outer, ClickRegion::Outer) => "Outer",
+                    (ClickRegion::Face, ClickRegion::Outer) => "Drag-Out",
+                    (ClickRegion::Outer, ClickRegion::Face) => "Drag-In",
+                };
+                println!("{} {:02}:{:02} - {:02}:{:02}", drag_type, start_h, start_m, end_h, end_m);
             }
         }
 
@@ -134,32 +141,120 @@ impl CircularRegion {
     }
 }
 
+/// State for the canvas program to track dragging
+#[derive(Default)]
+struct ClockState {
+    /// Current cursor position for tooltip display
+    cursor_info: Option<CursorInfo>,
+    /// When mouse is pressed, stores drag start info
+    dragging: Option<DragState>,
+}
+
+#[derive(Clone, Copy)]
+struct CursorInfo {
+    position: Point,
+    time_float: f32,
+}
+
+#[derive(Clone, Copy)]
+struct DragState {
+    start_region: ClickRegion,
+    start_time: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ClickRegion {
+    Face,
+    Outer,
+}
+
 impl canvas::Program<ClockMessage> for Clock {
-    type State = ();
+    type State = ClockState;
 
     fn update(
         &self,
-        _state: &mut Self::State,
+        state: &mut Self::State,
         event: &iced::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<ClockMessage>> {
         match event {
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                if let Some(position) = cursor.position() {
+                if let Some(position) = cursor.position_in(bounds) {
+                    // Use frame-relative center (position_in returns frame-relative coords)
+                    let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                     let radius = bounds.width.min(bounds.height) / 2.0;
-                    let cursor_radius = bounds.center().distance(position) / radius;
+                    let cursor_radius = center.distance(position) / radius;
 
                     if CENTER_BUTTON_REGION.contains(cursor_radius) {
                         Some(canvas::Action::publish(ClockMessage::CenterClick))
-                    } else if CLOCK_FACE_REGION.contains(cursor_radius) {
-                        let time_float = unit_from_position(bounds.center(), position, 12);
-                        Some(canvas::Action::publish(ClockMessage::FaceClick(time_float)))
                     } else {
-                        let time_float = unit_from_position(bounds.center(), position, 12);
-                        Some(canvas::Action::publish(ClockMessage::OuterClick(time_float)))
+                        let time_float = unit_from_position(center, position, 12);
+                        let start_region = if CLOCK_FACE_REGION.contains(cursor_radius) {
+                            ClickRegion::Face
+                        } else {
+                            ClickRegion::Outer
+                        };
+                        state.dragging = Some(DragState {
+                            start_region,
+                            start_time: time_float,
+                        });
+                        state.cursor_info = Some(CursorInfo { position, time_float });
+                        Some(canvas::Action::request_redraw())
                     }
                 } else {
+                    None
+                }
+            }
+            iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                if let Some(position) = cursor.position_in(bounds) {
+                    // Use frame-relative center (position_in returns frame-relative coords)
+                    let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
+                    let radius = bounds.width.min(bounds.height) / 2.0;
+                    let cursor_radius = center.distance(position) / radius;
+
+                    // Only show tooltip over face or outer regions (not center button)
+                    if !CENTER_BUTTON_REGION.contains(cursor_radius) {
+                        let time_float = unit_from_position(center, position, 12);
+                        state.cursor_info = Some(CursorInfo {
+                            position,
+                            time_float,
+                        });
+                        Some(canvas::Action::request_redraw())
+                    } else {
+                        state.cursor_info = None;
+                        Some(canvas::Action::request_redraw())
+                    }
+                } else {
+                    state.cursor_info = None;
+                    Some(canvas::Action::request_redraw())
+                }
+            }
+            iced::Event::Mouse(mouse::Event::CursorLeft) => {
+                state.cursor_info = None;
+                Some(canvas::Action::request_redraw())
+            }
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if let (Some(drag_state), Some(cursor_info)) = (state.dragging.take(), &state.cursor_info) {
+                    // Use frame-relative center
+                    let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
+                    let radius = bounds.width.min(bounds.height) / 2.0;
+                    let cursor_radius = center.distance(cursor_info.position) / radius;
+
+                    let end_region = if CLOCK_FACE_REGION.contains(cursor_radius) {
+                        ClickRegion::Face
+                    } else {
+                        ClickRegion::Outer
+                    };
+                    let message = ClockMessage::Click {
+                        start_region: drag_state.start_region,
+                        end_region,
+                        start_time: drag_state.start_time,
+                        end_time: cursor_info.time_float,
+                    };
+                    Some(canvas::Action::publish(message))
+                } else {
+                    state.dragging = None;
                     None
                 }
             }
@@ -169,7 +264,7 @@ impl canvas::Program<ClockMessage> for Clock {
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -271,26 +366,66 @@ impl canvas::Program<ClockMessage> for Clock {
             frame.fill(&center, Color::from_rgb8(0x92, 0x93, 0xD8));
         });
 
-        vec![clock]
+        let mut geometries = vec![clock];
+
+        // Draw tooltip when cursor is over face or outer regions
+        if let Some(cursor_info) = &state.cursor_info {
+            let tooltip = canvas::Cache::default().draw(renderer, bounds.size(), |frame| {
+                let (hours, minutes) = hours_and_minutes(cursor_info.time_float);
+                let time_text = format!("{:02}:{:02}", hours, minutes);
+
+                let font_size = 16.0;
+                let padding = 4.0;
+                let text_width = 42.0; // Approximate width for "HH:MM" at 16px
+                let text_height = font_size;
+
+                // Position tooltip near cursor with offset
+                let tooltip_x = cursor_info.position.x + 15.0;
+                let tooltip_y = cursor_info.position.y - 10.0;
+
+                // Draw rounded rectangle background
+                let bg_rect = Path::rounded_rectangle(
+                    Point::new(tooltip_x - padding, tooltip_y - padding),
+                    iced::Size::new(text_width + padding * 2.0, text_height + padding * 2.0),
+                    4.0.into(),
+                );
+                frame.fill(&bg_rect, Color::from_rgba8(0, 0, 0, 0.8));
+
+                frame.fill_text(canvas::Text {
+                    content: time_text,
+                    position: Point::new(tooltip_x, tooltip_y),
+                    color: Color::WHITE,
+                    size: iced::Pixels(font_size),
+                    ..canvas::Text::default()
+                });
+            });
+            geometries.push(tooltip);
+        }
+
+        geometries
     }
 
     fn mouse_interaction(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        match cursor.position() {
+        match cursor.position_in(bounds) {
             Some(position) => {
+                // Use frame-relative center
+                let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                 let radius = bounds.width.min(bounds.height) / 2.0;
-                let cursor_radius = bounds.center().distance(position) / radius;
+                let cursor_radius = center.distance(position) / radius;
 
                 if CENTER_BUTTON_REGION.contains(cursor_radius) {
                     mouse::Interaction::Crosshair
-                } else if CLOCK_FACE_REGION.contains(cursor_radius) {
-                    mouse::Interaction::Grabbing
+                } else if state.dragging.is_some() {
+                    // Arrow/pointer while dragging
+                    mouse::Interaction::Pointer
                 } else {
-                    mouse::Interaction::default()
+                    // Crosshair when hovering over face or outer areas
+                    mouse::Interaction::Crosshair
                 }
             },
             None => mouse::Interaction::default(),
