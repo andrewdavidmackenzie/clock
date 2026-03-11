@@ -413,7 +413,7 @@ impl canvas::Program<ClockMessage> for Clock {
             let tooltip = canvas::Cache::default().draw(renderer, bounds.size(), |frame| {
                 let font_size = 16.0;
                 let padding = 4.0;
-                let text_width = 62.0; // Approximate width for "HH:MM AM" at 16px
+                let text_width = 92.0; // Width for "HH:MM AM" tooltip (wider for SW rendering)
                 let text_height = font_size;
 
                 // Position tooltip near cursor with offset
