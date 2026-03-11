@@ -403,14 +403,11 @@ impl Clock {
                 }
             }
             ClockMessage::EventsLoaded(events) => {
-                println!("Loaded {} upcoming events", events.len());
-                for event in &events {
-                    if let Some(summary) = &event.summary {
-                        println!("  - {}", summary);
-                    }
+                // Only apply events if user is still logged in (guard against stale async results)
+                if self.user_info.is_some() {
+                    self.upcoming_events = events;
+                    self.clock.clear();
                 }
-                self.upcoming_events = events;
-                self.clock.clear();
             }
             ClockMessage::Click { start_region, end_region, start_time, end_time } => {
                 let (start_h, start_m) = hours_and_minutes(start_time);
@@ -804,12 +801,20 @@ impl canvas::Program<ClockMessage> for Clock {
                     let start_angle = time_to_angle(display_start.hour(), display_start.minute());
                     let end_angle = time_to_angle(display_end.hour(), display_end.minute());
 
-                    // Handle wrap-around (e.g., 11pm to 1am)
+                    // Handle wrap-around and zero-length arcs
                     let (start_a, end_a) = if end_angle < start_angle {
                         (start_angle, end_angle + 2.0 * PI)
+                    } else if (end_angle - start_angle).abs() < 0.001 {
+                        // If angles are nearly equal (12-hour event), draw full circle
+                        (start_angle, start_angle + 2.0 * PI)
                     } else {
                         (start_angle, end_angle)
                     };
+
+                    // Skip if arc is too small to be visible
+                    if (end_a - start_a) < 0.02 {
+                        continue;
+                    }
 
                     // Draw arc using path builder
                     let color = event_color(index);
@@ -868,10 +873,12 @@ impl canvas::Program<ClockMessage> for Clock {
                         // Calculate how many characters fit
                         let arc_length = arc_span * text_radius;
                         let max_chars = (arc_length / char_width) as usize;
+                        let name_char_count = name.chars().count();
 
-                        // Truncate name if needed
-                        let display_name: String = if name.len() > max_chars && max_chars > 1 {
-                            format!("{}…", &name[..max_chars.saturating_sub(1).min(name.len())])
+                        // Truncate name if needed (Unicode-safe)
+                        let display_name: String = if name_char_count > max_chars && max_chars > 1 {
+                            let truncated: String = name.chars().take(max_chars.saturating_sub(1)).collect();
+                            format!("{}…", truncated)
                         } else {
                             name.clone()
                         };
