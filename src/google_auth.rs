@@ -203,11 +203,59 @@ impl GoogleAuth {
         Ok(())
     }
 
-    pub fn load_tokens(&self) -> Option<String> {
+    fn load_stored_tokens(&self) -> Option<StoredTokens> {
         let path = Self::get_token_path();
         let content = fs::read_to_string(path).ok()?;
-        let tokens: StoredTokens = serde_json::from_str(&content).ok()?;
-        Some(tokens.access_token)
+        serde_json::from_str(&content).ok()
+    }
+
+    /// Try to get a valid access token, refreshing if necessary
+    pub fn get_valid_access_token(&self) -> Option<String> {
+        let tokens = self.load_stored_tokens()?;
+
+        // First try the stored access token
+        if self.is_token_valid(&tokens.access_token) {
+            return Some(tokens.access_token);
+        }
+
+        // Access token expired, try to refresh
+        if let Some(refresh_token) = tokens.refresh_token {
+            if let Ok(new_access_token) = self.refresh_access_token(&refresh_token) {
+                return Some(new_access_token);
+            }
+        }
+
+        None
+    }
+
+    fn is_token_valid(&self, access_token: &str) -> bool {
+        // Quick validation by trying to fetch user info
+        self.get_user_info(access_token).is_ok()
+    }
+
+    fn refresh_access_token(&self, refresh_token: &str) -> Result<String, String> {
+        use oauth2::RefreshToken;
+
+        let client = self.create_client();
+        let token_result = client
+            .exchange_refresh_token(&RefreshToken::new(refresh_token.to_string()))
+            .request(http_client)
+            .map_err(|e| format!("Token refresh failed: {:?}", e))?;
+
+        let new_access_token = token_result.access_token().secret().clone();
+        let new_refresh_token = token_result
+            .refresh_token()
+            .map(|t| t.secret().clone())
+            .or_else(|| Some(refresh_token.to_string())); // Keep old refresh token if not returned
+
+        // Save updated tokens
+        let tokens = StoredTokens {
+            access_token: new_access_token.clone(),
+            refresh_token: new_refresh_token,
+        };
+        self.save_tokens(&tokens)?;
+
+        Ok(new_access_token)
     }
 
     pub fn clear_tokens(&self) -> Result<(), String> {

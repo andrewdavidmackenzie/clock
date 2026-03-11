@@ -154,9 +154,9 @@ impl Clock {
     fn new() -> (Self, Task<ClockMessage>) {
         let google_auth = GoogleAuth::new();
 
-        // Try to restore previous login session
+        // Try to restore previous login session (with token refresh if needed)
         let user_info = google_auth.as_ref().and_then(|auth| {
-            auth.load_tokens().and_then(|token| {
+            auth.get_valid_access_token().and_then(|token| {
                 match auth.get_user_info(&token) {
                     Ok(info) => {
                         // Also fetch and print the next calendar event
