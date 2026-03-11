@@ -10,6 +10,11 @@ use chrono::Local;
 use std::f32::consts::PI;
 
 const CENTER_BUTTON_RADIUS: f32 = 0.07;
+const EXIT_BUTTON_WIDTH: f32 = 120.0;
+const EXIT_BUTTON_HEIGHT: f32 = 36.0;
+const EXIT_BUTTON_Y_OFFSET: f32 = 10.0;
+const MODAL_WIDTH: f32 = 200.0;
+const MODAL_HEIGHT: f32 = 100.0;
 const HOUR_HAND_RADIUS: f32 = 0.7;
 const MINUTE_HAND_RADIUS: f32 = 0.9;
 const SECOND_HAND_RADIUS: f32 = 0.95;
@@ -230,15 +235,13 @@ impl canvas::Program<ClockMessage> for Clock {
 
                     // Check if menu is open and click is on Exit button
                     if self.menu_open {
-                        let button_width = 120.0;
-                        let button_height = 36.0;
-                        let button_x = center.x - button_width / 2.0;
-                        let button_y = center.y - button_height / 2.0 + 10.0;
+                        let button_x = center.x - EXIT_BUTTON_WIDTH / 2.0;
+                        let button_y = center.y - EXIT_BUTTON_HEIGHT / 2.0 + EXIT_BUTTON_Y_OFFSET;
 
                         if position.x >= button_x
-                            && position.x <= button_x + button_width
+                            && position.x <= button_x + EXIT_BUTTON_WIDTH
                             && position.y >= button_y
-                            && position.y <= button_y + button_height
+                            && position.y <= button_y + EXIT_BUTTON_HEIGHT
                         {
                             return Some(canvas::Action::publish(ClockMessage::ExitClick));
                         }
@@ -485,15 +488,13 @@ impl canvas::Program<ClockMessage> for Clock {
                 let center = frame.center();
 
                 // Modal dimensions
-                let modal_width = 200.0;
-                let modal_height = 100.0;
-                let modal_x = center.x - modal_width / 2.0;
-                let modal_y = center.y - modal_height / 2.0;
+                let modal_x = center.x - MODAL_WIDTH / 2.0;
+                let modal_y = center.y - MODAL_HEIGHT / 2.0;
 
                 // Draw modal background with rounded corners
                 let modal_bg = Path::rounded_rectangle(
                     Point::new(modal_x, modal_y),
-                    iced::Size::new(modal_width, modal_height),
+                    iced::Size::new(MODAL_WIDTH, MODAL_HEIGHT),
                     12.0.into(),
                 );
                 frame.fill(&modal_bg, Color::from_rgba8(40, 40, 40, 0.9));
@@ -506,15 +507,13 @@ impl canvas::Program<ClockMessage> for Clock {
                 });
 
                 // Exit button dimensions
-                let button_width = 120.0;
-                let button_height = 36.0;
-                let button_x = center.x - button_width / 2.0;
-                let button_y = center.y - button_height / 2.0 + 10.0;
+                let button_x = center.x - EXIT_BUTTON_WIDTH / 2.0;
+                let button_y = center.y - EXIT_BUTTON_HEIGHT / 2.0 + EXIT_BUTTON_Y_OFFSET;
 
                 // Draw Exit button background
                 let button_bg = Path::rounded_rectangle(
                     Point::new(button_x, button_y),
-                    iced::Size::new(button_width, button_height),
+                    iced::Size::new(EXIT_BUTTON_WIDTH, EXIT_BUTTON_HEIGHT),
                     6.0.into(),
                 );
                 frame.fill(&button_bg, Color::from_rgb8(180, 60, 60));
@@ -546,6 +545,21 @@ impl canvas::Program<ClockMessage> for Clock {
                 let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                 let radius = bounds.width.min(bounds.height) / 2.0;
                 let cursor_radius = center.distance(position) / radius;
+
+                // Check if hovering over Exit button when menu is open
+                if self.menu_open {
+                    let button_x = center.x - EXIT_BUTTON_WIDTH / 2.0;
+                    let button_y = center.y - EXIT_BUTTON_HEIGHT / 2.0 + EXIT_BUTTON_Y_OFFSET;
+
+                    if position.x >= button_x
+                        && position.x <= button_x + EXIT_BUTTON_WIDTH
+                        && position.y >= button_y
+                        && position.y <= button_y + EXIT_BUTTON_HEIGHT
+                    {
+                        return mouse::Interaction::Pointer;
+                    }
+                    return mouse::Interaction::default();
+                }
 
                 if state.dragging.is_some() {
                     // Arrow/pointer while dragging (takes priority)
