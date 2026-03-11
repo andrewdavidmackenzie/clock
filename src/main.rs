@@ -478,8 +478,15 @@ struct ClockState {
     exit_button_pressed: bool,
     /// Track if login/logout button is being pressed
     login_button_pressed: bool,
-    /// Event being hovered over (name and cursor position)
-    hovered_event: Option<(String, Point)>,
+    /// Event being hovered over (name, time range, cursor position)
+    hovered_event: Option<HoveredEvent>,
+}
+
+#[derive(Clone)]
+struct HoveredEvent {
+    name: String,
+    time_range: String,
+    position: Point,
 }
 
 #[derive(Clone, Copy)]
@@ -614,7 +621,16 @@ impl canvas::Program<ClockMessage> for Clock {
                                 let cursor_a = if cursor_angle < start_a { cursor_angle + 2.0 * PI } else { cursor_angle };
                                 if cursor_a >= start_a && cursor_a <= end_a {
                                     if let Some(name) = &event.summary {
-                                        state.hovered_event = Some((name.clone(), position));
+                                        let time_range = format!(
+                                            "{:02}:{:02} - {:02}:{:02}",
+                                            start.hour(), start.minute(),
+                                            end.hour(), end.minute()
+                                        );
+                                        state.hovered_event = Some(HoveredEvent {
+                                            name: name.clone(),
+                                            time_range,
+                                            position,
+                                        });
                                         break;
                                     }
                                 }
@@ -981,17 +997,19 @@ impl canvas::Program<ClockMessage> for Clock {
         }
 
         // Draw event hover tooltip
-        if let Some((event_name, position)) = &state.hovered_event {
+        if let Some(hovered) = &state.hovered_event {
             let event_tooltip = canvas::Cache::default().draw(renderer, bounds.size(), |frame| {
-                let font_size = 16.0;
+                let time_font_size = 14.0;
+                let name_font_size = 16.0;
                 let padding = 8.0;
-                let char_width = font_size * 0.6;
-                let text_width = (event_name.len() as f32 * char_width).max(100.0);
-                let text_height = font_size;
+                let line_spacing = 4.0;
+                let char_width = name_font_size * 0.6;
+                let text_width = (hovered.name.len() as f32 * char_width).max(120.0);
+                let text_height = time_font_size + line_spacing + name_font_size;
 
                 // Position tooltip near cursor with offset
-                let tooltip_x = position.x + 15.0;
-                let tooltip_y = position.y - 10.0;
+                let tooltip_x = hovered.position.x + 15.0;
+                let tooltip_y = hovered.position.y - 10.0;
 
                 // Draw rounded rectangle background
                 let bg_rect = Path::rounded_rectangle(
@@ -1001,11 +1019,21 @@ impl canvas::Program<ClockMessage> for Clock {
                 );
                 frame.fill(&bg_rect, Color::from_rgba8(0, 0, 0, 0.9));
 
+                // Draw time range (first line)
                 frame.fill_text(canvas::Text {
-                    content: event_name.clone(),
+                    content: hovered.time_range.clone(),
                     position: Point::new(tooltip_x, tooltip_y),
+                    color: Color::from_rgb8(180, 180, 180),
+                    size: iced::Pixels(time_font_size),
+                    ..canvas::Text::default()
+                });
+
+                // Draw event name (second line)
+                frame.fill_text(canvas::Text {
+                    content: hovered.name.clone(),
+                    position: Point::new(tooltip_x, tooltip_y + time_font_size + line_spacing),
                     color: Color::WHITE,
-                    size: iced::Pixels(font_size),
+                    size: iced::Pixels(name_font_size),
                     ..canvas::Text::default()
                 });
             });
