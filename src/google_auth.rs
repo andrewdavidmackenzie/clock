@@ -16,6 +16,10 @@ const GOOGLE_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo
 const GOOGLE_CALENDAR_EVENTS_URL: &str = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const REDIRECT_PORT: u16 = 8085;
 
+// Default OAuth client ID for the clock app (can be overridden via GOOGLE_CLIENT_ID env var)
+// To create your own: Google Cloud Console -> APIs & Services -> Credentials -> Create OAuth client ID -> Desktop app
+const DEFAULT_CLIENT_ID: &str = "95536384409-hrd7nebrgggunk7ccbc7nvsji4qr3vo3.apps.googleusercontent.com";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserInfo {
     pub id: String,
@@ -52,14 +56,24 @@ struct StoredTokens {
 #[derive(Debug, Clone)]
 pub struct GoogleAuth {
     client_id: String,
-    client_secret: String,
+    client_secret: Option<String>,
 }
 
 impl GoogleAuth {
     pub fn new() -> Option<Self> {
-        // Try to load credentials from environment or config file
-        let client_id = std::env::var("GOOGLE_CLIENT_ID").ok()?;
-        let client_secret = std::env::var("GOOGLE_CLIENT_SECRET").ok()?;
+        // Try env var first, fall back to embedded default
+        let client_id = std::env::var("GOOGLE_CLIENT_ID")
+            .ok()
+            .or_else(|| {
+                if DEFAULT_CLIENT_ID.is_empty() {
+                    None
+                } else {
+                    Some(DEFAULT_CLIENT_ID.to_string())
+                }
+            })?;
+
+        // Client secret is optional for native apps using PKCE
+        let client_secret = std::env::var("GOOGLE_CLIENT_SECRET").ok();
 
         Some(Self {
             client_id,
@@ -77,7 +91,7 @@ impl GoogleAuth {
     fn create_client(&self) -> BasicClient {
         BasicClient::new(
             ClientId::new(self.client_id.clone()),
-            Some(ClientSecret::new(self.client_secret.clone())),
+            self.client_secret.as_ref().map(|s| ClientSecret::new(s.clone())),
             AuthUrl::new(GOOGLE_AUTH_URL.to_string()).unwrap(),
             Some(TokenUrl::new(GOOGLE_TOKEN_URL.to_string()).unwrap()),
         )
