@@ -215,7 +215,9 @@ impl canvas::Program<ClockMessage> for Clock {
             };
 
             frame.with_save(|frame| {
-                frame.rotate(hand_rotation(self.now.naive_local().time().minute() as u8, 60));
+                let time = self.now.naive_local().time();
+                let minute_with_seconds = time.minute() as f32 + (time.second() as f32 / 60.0);
+                frame.rotate(2.0 * PI * minute_with_seconds / 60.0);
                 frame.stroke(&minute_hand, minute_width());
             });
 
