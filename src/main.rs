@@ -270,6 +270,7 @@ impl Clock {
                     Ok(user_info) => {
                         println!("Logged in as: {}", user_info.name);
                         self.user_info = Some(user_info);
+                        self.menu_open = false; // Close modal on successful login
                     }
                     Err(e) => {
                         eprintln!("Login failed: {}", e);
