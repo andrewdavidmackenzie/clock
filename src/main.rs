@@ -108,6 +108,7 @@ enum ClockMessage {
     LoginClick,
     LogoutClick,
     LoginComplete(Result<UserInfo, String>),
+    SessionRestored(Option<UserInfo>),
     Click {
         start_region: ClickRegion,
         end_region: ClickRegion,
@@ -154,28 +155,37 @@ impl Clock {
     fn new() -> (Self, Task<ClockMessage>) {
         let google_auth = GoogleAuth::new();
 
-        // Try to restore previous login session (with token refresh if needed)
-        let user_info = google_auth.as_ref().and_then(|auth| {
-            auth.get_valid_access_token().and_then(|token| {
-                match auth.get_user_info(&token) {
-                    Ok(info) => {
-                        // Also fetch and print the next calendar event
-                        if let Ok(Some(event)) = auth.get_next_calendar_event(&token) {
-                            if let Some(summary) = &event.summary {
-                                let time = event.start
-                                    .as_ref()
-                                    .and_then(|s| s.date_time.as_ref().or(s.date.as_ref()))
-                                    .map(|s| s.as_str())
-                                    .unwrap_or("unknown time");
-                                println!("Next calendar event: {} at {}", summary, time);
+        // Create the task to restore session asynchronously (don't block first frame)
+        let restore_task = if let Some(auth) = google_auth.clone() {
+            Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        auth.get_valid_access_token().and_then(|token| {
+                            match auth.get_user_info(&token) {
+                                Ok(info) => {
+                                    // Also fetch and print the next calendar event
+                                    if let Ok(Some(event)) = auth.get_next_calendar_event(&token) {
+                                        if let Some(summary) = &event.summary {
+                                            let time = event.start
+                                                .as_ref()
+                                                .and_then(|s| s.date_time.as_ref().or(s.date.as_ref()))
+                                                .map(|s| s.as_str())
+                                                .unwrap_or("unknown time");
+                                            println!("Next calendar event: {} at {}", summary, time);
+                                        }
+                                    }
+                                    Some(info)
+                                }
+                                Err(_) => None,
                             }
-                        }
-                        Some(info)
-                    }
-                    Err(_) => None,
-                }
-            })
-        });
+                        })
+                    }).await.unwrap_or(None)
+                },
+                ClockMessage::SessionRestored,
+            )
+        } else {
+            Task::none()
+        };
 
         (
             Clock {
@@ -183,10 +193,10 @@ impl Clock {
                 clock: Default::default(),
                 menu_open: false,
                 google_auth,
-                user_info,
+                user_info: None,
                 login_in_progress: false,
             },
-            Task::none()
+            restore_task
         )
     }
     
@@ -279,6 +289,13 @@ impl Clock {
                     }
                 }
                 self.clock.clear();
+            }
+            ClockMessage::SessionRestored(user_info) => {
+                if let Some(info) = user_info {
+                    println!("Session restored for: {}", info.name);
+                    self.user_info = Some(info);
+                    self.clock.clear();
+                }
             }
             ClockMessage::Click { start_region, end_region, start_time, end_time } => {
                 let (start_h, start_m) = hours_and_minutes(start_time);
