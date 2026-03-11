@@ -29,6 +29,7 @@ fn main() -> iced::Result {
     let window_settings = window::Settings {
         resizable: false,
         decorations: false,
+        fullscreen: true,
         ..window::Settings::default()
     };
 
@@ -65,7 +66,7 @@ impl Clock {
                 now: Local::now(),
                 clock: Default::default(),
             },
-            window::latest().and_then(|id| window::set_mode(id, window::Mode::Fullscreen))
+            Task::none()
         )
     }
     
