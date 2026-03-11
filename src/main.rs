@@ -621,10 +621,22 @@ impl canvas::Program<ClockMessage> for Clock {
                                 let cursor_a = if cursor_angle < start_a { cursor_angle + 2.0 * PI } else { cursor_angle };
                                 if cursor_a >= start_a && cursor_a <= end_a {
                                     if let Some(name) = &event.summary {
+                                        let format_time_12h = |hour: u32, minute: u32| -> String {
+                                            let (h12, period) = if hour == 0 {
+                                                (12, "AM")
+                                            } else if hour < 12 {
+                                                (hour, "AM")
+                                            } else if hour == 12 {
+                                                (12, "PM")
+                                            } else {
+                                                (hour - 12, "PM")
+                                            };
+                                            format!("{:02}:{:02} {}", h12, minute, period)
+                                        };
                                         let time_range = format!(
-                                            "{:02}:{:02} - {:02}:{:02}",
-                                            start.hour(), start.minute(),
-                                            end.hour(), end.minute()
+                                            "{} - {}",
+                                            format_time_12h(start.hour(), start.minute()),
+                                            format_time_12h(end.hour(), end.minute())
                                         );
                                         state.hovered_event = Some(HoveredEvent {
                                             name: name.clone(),
