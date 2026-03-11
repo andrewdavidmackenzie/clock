@@ -15,6 +15,10 @@ const MINUTE_HAND_RADIUS: f32 = 0.9;
 const SECOND_HAND_RADIUS: f32 = 0.95;
 const CLOCK_FACE_RADIUS: f32 = 1.0;
 
+const TICK_OUTER_RADIUS: f32 = 0.95;
+const HOUR_TICK_INNER_RADIUS: f32 = 0.85;
+const QUARTER_TICK_INNER_RADIUS: f32 = 0.80;
+
 const CENTER_BUTTON_REGION : CircularRegion = { CircularRegion {
     inner_radius: 0.0,
     outer_radius: CENTER_BUTTON_RADIUS
@@ -179,6 +183,31 @@ impl canvas::Program<ClockMessage> for Clock {
 
             let background = Path::circle(Point::ORIGIN, radius * CLOCK_FACE_RADIUS);
             frame.fill(&background, Color::from_rgb8(0x12, 0x93, 0xD8));
+
+            // Draw hour ticks around the clock face
+            let tick_stroke = Stroke {
+                width: radius / 40.0,
+                style: stroke::Style::Solid(Color::WHITE),
+                line_cap: LineCap::Round,
+                ..Stroke::default()
+            };
+
+            for hour in 0..12 {
+                let inner_radius = if hour % 3 == 0 {
+                    QUARTER_TICK_INNER_RADIUS
+                } else {
+                    HOUR_TICK_INNER_RADIUS
+                };
+
+                frame.with_save(|frame| {
+                    frame.rotate(2.0 * PI * hour as f32 / 12.0);
+                    let tick = Path::line(
+                        Point::new(0.0, -(inner_radius * radius)),
+                        Point::new(0.0, -(TICK_OUTER_RADIUS * radius)),
+                    );
+                    frame.stroke(&tick, tick_stroke);
+                });
+            }
 
             let hour_hand =
                 Path::line(Point::ORIGIN, Point::new(0.0, - (HOUR_HAND_RADIUS * radius)));
