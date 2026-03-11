@@ -218,14 +218,14 @@ impl Clock {
                             // This runs the OAuth flow in a blocking manner
                             tokio::task::spawn_blocking(move || {
                                 match auth.start_login() {
-                                    Ok((auth_url, pkce_verifier)) => {
+                                    Ok((auth_url, pkce_verifier, csrf_token)) => {
                                         // Open browser for user to authenticate
                                         if webbrowser::open(&auth_url).is_err() {
                                             return Err("Failed to open browser".to_string());
                                         }
 
                                         // Wait for callback and exchange code for token
-                                        match auth.wait_for_callback(pkce_verifier) {
+                                        match auth.wait_for_callback(pkce_verifier, csrf_token) {
                                             Ok(access_token) => {
                                                 // Get user info
                                                 match auth.get_user_info(&access_token) {
@@ -259,7 +259,9 @@ impl Clock {
             }
             ClockMessage::LogoutClick => {
                 if let Some(auth) = &self.google_auth {
-                    let _ = auth.clear_tokens();
+                    if let Err(e) = auth.clear_tokens() {
+                        eprintln!("Warning: Failed to clear tokens: {}", e);
+                    }
                 }
                 self.user_info = None;
                 self.clock.clear();

@@ -86,30 +86,50 @@ impl GoogleAuth {
         .set_auth_type(AuthType::RequestBody)
     }
 
-    pub fn start_login(&self) -> Result<(String, PkceCodeVerifier), String> {
+    pub fn start_login(&self) -> Result<(String, PkceCodeVerifier, CsrfToken), String> {
         let client = self.create_client();
 
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
-        let (auth_url, _csrf_token) = client
+        let (auth_url, csrf_token) = client
             .authorize_url(CsrfToken::new_random)
             .add_scope(Scope::new("openid".to_string()))
             .add_scope(Scope::new("email".to_string()))
             .add_scope(Scope::new("profile".to_string()))
             .add_scope(Scope::new("https://www.googleapis.com/auth/calendar.readonly".to_string()))
+            .add_extra_param("access_type", "offline")
+            .add_extra_param("prompt", "consent")
             .set_pkce_challenge(pkce_challenge)
             .url();
 
-        Ok((auth_url.to_string(), pkce_verifier))
+        Ok((auth_url.to_string(), pkce_verifier, csrf_token))
     }
 
-    pub fn wait_for_callback(&self, pkce_verifier: PkceCodeVerifier) -> Result<String, String> {
+    pub fn wait_for_callback(&self, pkce_verifier: PkceCodeVerifier, expected_state: CsrfToken) -> Result<String, String> {
+        use std::time::{Duration, Instant};
+
         let listener = TcpListener::bind(format!("127.0.0.1:{}", REDIRECT_PORT))
             .map_err(|e| format!("Failed to bind to port {}: {}", REDIRECT_PORT, e))?;
 
-        let (mut stream, _) = listener
-            .accept()
-            .map_err(|e| format!("Failed to accept connection: {}", e))?;
+        // Set non-blocking with timeout
+        listener.set_nonblocking(true)
+            .map_err(|e| format!("Failed to set non-blocking: {}", e))?;
+
+        let timeout = Duration::from_secs(120);
+        let start = Instant::now();
+
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if start.elapsed() > timeout {
+                        return Err("Login timed out - no response received within 2 minutes".to_string());
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => return Err(format!("Failed to accept connection: {}", e)),
+            }
+        };
 
         let mut reader = BufReader::new(&stream);
         let mut request_line = String::new();
@@ -117,25 +137,32 @@ impl GoogleAuth {
             .read_line(&mut request_line)
             .map_err(|e| format!("Failed to read request: {}", e))?;
 
-        // Parse the authorization code from the callback URL
-        let code = request_line
+        // Parse query parameters from the callback URL
+        let query_string = request_line
             .split_whitespace()
             .nth(1)
-            .and_then(|path| {
-                path.split('?')
-                    .nth(1)
-                    .and_then(|query| {
-                        query.split('&').find_map(|param| {
-                            let mut parts = param.split('=');
-                            if parts.next() == Some("code") {
-                                parts.next().map(|s| s.to_string())
-                            } else {
-                                None
-                            }
-                        })
-                    })
-            })
-            .ok_or("Failed to extract authorization code")?;
+            .and_then(|path| path.split('?').nth(1))
+            .ok_or("Failed to parse callback URL")?;
+
+        let mut code = None;
+        let mut state = None;
+
+        for param in query_string.split('&') {
+            let mut parts = param.split('=');
+            match parts.next() {
+                Some("code") => code = parts.next().map(|s| s.to_string()),
+                Some("state") => state = parts.next().map(|s| s.to_string()),
+                _ => {}
+            }
+        }
+
+        let code = code.ok_or("Failed to extract authorization code")?;
+
+        // Validate CSRF state
+        let state = state.ok_or("Missing state parameter in callback")?;
+        if state != *expected_state.secret() {
+            return Err("Invalid state parameter - possible CSRF attack".to_string());
+        }
 
         // Send response to browser
         let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
