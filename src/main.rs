@@ -34,9 +34,9 @@ const EXIT_BUTTON_HEIGHT: f32 = 36.0;
 const EXIT_BUTTON_Y_OFFSET: f32 = 40.0;
 const LOGIN_BUTTON_WIDTH: f32 = 180.0;
 const LOGIN_BUTTON_HEIGHT: f32 = 36.0;
-const LOGIN_BUTTON_Y_OFFSET: f32 = -30.0;
+const LOGIN_BUTTON_Y_OFFSET: f32 = -5.0;
 const MODAL_WIDTH: f32 = 280.0;
-const MODAL_HEIGHT: f32 = 180.0;
+const MODAL_HEIGHT: f32 = 240.0;
 const HOUR_HAND_RADIUS: f32 = 0.7;
 const MINUTE_HAND_RADIUS: f32 = 0.9;
 const SECOND_HAND_RADIUS: f32 = 0.95;
@@ -759,9 +759,9 @@ impl canvas::Program<ClockMessage> for Clock {
 
                 if let Some(info) = &user_info {
                     // User is logged in - show avatar, name and logout button
-                    let avatar_size = 48.0;
+                    let avatar_size = 56.0;
                     let avatar_x = center.x - avatar_size / 2.0;
-                    let avatar_y = login_origin.y - 70.0;
+                    let avatar_y = login_origin.y - 95.0;
 
                     // Draw avatar if available, otherwise draw placeholder circle
                     if let Some(ref handle) = avatar {
@@ -784,7 +784,7 @@ impl canvas::Program<ClockMessage> for Clock {
                     // Draw name below avatar
                     frame.fill_text(canvas::Text {
                         content: info.name.clone(),
-                        position: Point::new(center.x - 60.0, login_origin.y - 15.0),
+                        position: Point::new(center.x - 60.0, login_origin.y - 30.0),
                         color: Color::WHITE,
                         size: iced::Pixels(14.0),
                         ..canvas::Text::default()
