@@ -10,7 +10,7 @@ use chrono::Local;
 use std::f32::consts::PI;
 
 mod google_auth;
-use google_auth::{GoogleAuth, UserInfo};
+use google_auth::{CalendarEvent, GoogleAuth, UserInfo};
 
 /// Fetch avatar image from URL asynchronously
 async fn fetch_avatar(url: String) -> Option<image::Handle> {
@@ -26,6 +26,48 @@ async fn fetch_avatar(url: String) -> Option<image::Handle> {
             _ => None,
         }
     }).await.ok().flatten()
+}
+
+/// Fetch upcoming calendar events asynchronously
+async fn fetch_events(auth: GoogleAuth) -> Vec<CalendarEvent> {
+    tokio::task::spawn_blocking(move || {
+        auth.get_valid_access_token()
+            .and_then(|token| auth.get_upcoming_events(&token).ok())
+            .unwrap_or_default()
+    }).await.unwrap_or_default()
+}
+
+/// Convert a time to angle on a 12-hour clock (radians from 12 o'clock, clockwise)
+fn time_to_angle(hour: u32, minute: u32) -> f32 {
+    let hour_12 = (hour % 12) as f32;
+    let fraction = hour_12 + (minute as f32 / 60.0);
+    2.0 * PI * fraction / 12.0
+}
+
+/// Parse ISO8601 datetime string to local DateTime
+fn parse_event_time(time_str: &str) -> Option<DateTime<Local>> {
+    // Try parsing with timezone
+    if let Ok(dt) = DateTime::parse_from_rfc3339(time_str) {
+        return Some(dt.with_timezone(&Local));
+    }
+    // Try parsing date only (all-day events)
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(time_str, "%Y-%m-%d") {
+        return Some(Local.from_local_datetime(&date.and_hms_opt(0, 0, 0)?).single()?);
+    }
+    None
+}
+
+/// Generate a color for an event based on its index
+fn event_color(index: usize) -> Color {
+    let colors = [
+        Color::from_rgb8(76, 175, 80),   // Green
+        Color::from_rgb8(255, 152, 0),   // Orange
+        Color::from_rgb8(156, 39, 176),  // Purple
+        Color::from_rgb8(233, 30, 99),   // Pink
+        Color::from_rgb8(0, 188, 212),   // Cyan
+        Color::from_rgb8(255, 235, 59),  // Yellow
+    ];
+    colors[index % colors.len()]
 }
 
 const CENTER_BUTTON_RADIUS: f32 = 0.07;
@@ -45,6 +87,10 @@ const CLOCK_FACE_RADIUS: f32 = 1.0;
 const TICK_OUTER_RADIUS: f32 = 0.95;
 const HOUR_TICK_INNER_RADIUS: f32 = 0.85;
 const QUARTER_TICK_INNER_RADIUS: f32 = 0.80;
+
+// Event arc constants - drawn outside the clock face
+const EVENT_ARC_INNER_RADIUS: f32 = 1.02;
+const EVENT_ARC_OUTER_RADIUS: f32 = 1.12;
 
 const CENTER_BUTTON_REGION : CircularRegion = { CircularRegion {
     inner_radius: 0.0,
@@ -113,6 +159,7 @@ struct Clock {
     google_auth: Option<GoogleAuth>,
     user_info: Option<UserInfo>,
     avatar: Option<image::Handle>,
+    upcoming_events: Vec<CalendarEvent>,
     login_in_progress: bool,
 }
 
@@ -127,6 +174,7 @@ enum ClockMessage {
     LoginComplete(Result<UserInfo, String>),
     SessionRestored(Option<UserInfo>),
     AvatarLoaded(Option<image::Handle>),
+    EventsLoaded(Vec<CalendarEvent>),
     Click {
         start_region: ClickRegion,
         end_region: ClickRegion,
@@ -213,6 +261,7 @@ impl Clock {
                 google_auth,
                 user_info: None,
                 avatar: None,
+                upcoming_events: Vec::new(),
                 login_in_progress: false,
             },
             restore_task
@@ -294,6 +343,7 @@ impl Clock {
                 }
                 self.user_info = None;
                 self.avatar = None;
+                self.upcoming_events.clear();
                 self.clock.clear();
             }
             ClockMessage::LoginComplete(result) => {
@@ -305,12 +355,18 @@ impl Clock {
                         self.user_info = Some(user_info);
                         self.menu_open = false; // Close modal on successful login
                         self.clock.clear();
+
+                        let mut tasks = Vec::new();
                         // Fetch avatar if available
                         if let Some(url) = avatar_url {
-                            return Task::perform(
-                                fetch_avatar(url),
-                                ClockMessage::AvatarLoaded,
-                            );
+                            tasks.push(Task::perform(fetch_avatar(url), ClockMessage::AvatarLoaded));
+                        }
+                        // Fetch upcoming events
+                        if let Some(auth) = self.google_auth.clone() {
+                            tasks.push(Task::perform(fetch_events(auth), ClockMessage::EventsLoaded));
+                        }
+                        if !tasks.is_empty() {
+                            return Task::batch(tasks);
                         }
                     }
                     Err(e) => {
@@ -325,12 +381,18 @@ impl Clock {
                     let avatar_url = info.picture.clone();
                     self.user_info = Some(info);
                     self.clock.clear();
+
+                    let mut tasks = Vec::new();
                     // Fetch avatar if available
                     if let Some(url) = avatar_url {
-                        return Task::perform(
-                            fetch_avatar(url),
-                            ClockMessage::AvatarLoaded,
-                        );
+                        tasks.push(Task::perform(fetch_avatar(url), ClockMessage::AvatarLoaded));
+                    }
+                    // Fetch upcoming events
+                    if let Some(auth) = self.google_auth.clone() {
+                        tasks.push(Task::perform(fetch_events(auth), ClockMessage::EventsLoaded));
+                    }
+                    if !tasks.is_empty() {
+                        return Task::batch(tasks);
                     }
                 }
             }
@@ -339,6 +401,16 @@ impl Clock {
                     self.avatar = Some(h);
                     self.clock.clear();
                 }
+            }
+            ClockMessage::EventsLoaded(events) => {
+                println!("Loaded {} upcoming events", events.len());
+                for event in &events {
+                    if let Some(summary) = &event.summary {
+                        println!("  - {}", summary);
+                    }
+                }
+                self.upcoming_events = events;
+                self.clock.clear();
             }
             ClockMessage::Click { start_region, end_region, start_time, end_time } => {
                 let (start_h, start_m) = hours_and_minutes(start_time);
@@ -624,6 +696,114 @@ impl canvas::Program<ClockMessage> for Clock {
                     );
                     frame.stroke(&tick, tick_stroke);
                 });
+            }
+
+            // Draw event arcs around the perimeter
+            let now = self.now;
+            for (index, event) in self.upcoming_events.iter().enumerate() {
+                // Parse start and end times
+                let start_time = event.start.as_ref().and_then(|s| {
+                    s.date_time.as_ref().or(s.date.as_ref()).and_then(|t| parse_event_time(t))
+                });
+                let end_time = event.end.as_ref().and_then(|e| {
+                    e.date_time.as_ref().or(e.date.as_ref()).and_then(|t| parse_event_time(t))
+                });
+
+                if let (Some(start), Some(end)) = (start_time, end_time) {
+                    // Only draw events that are within the visible 12-hour window
+                    let now_plus_12 = now + chrono::Duration::hours(12);
+                    if start > now_plus_12 || end < now {
+                        continue;
+                    }
+
+                    // Clamp start to now if event already started
+                    let display_start = if start < now { now } else { start };
+                    let display_end = if end > now_plus_12 { now_plus_12 } else { end };
+
+                    let start_angle = time_to_angle(display_start.hour(), display_start.minute());
+                    let end_angle = time_to_angle(display_end.hour(), display_end.minute());
+
+                    // Handle wrap-around (e.g., 11pm to 1am)
+                    let (start_a, end_a) = if end_angle < start_angle {
+                        (start_angle, end_angle + 2.0 * PI)
+                    } else {
+                        (start_angle, end_angle)
+                    };
+
+                    // Draw arc using path builder
+                    let color = event_color(index);
+                    let inner_r = radius * EVENT_ARC_INNER_RADIUS;
+                    let outer_r = radius * EVENT_ARC_OUTER_RADIUS;
+
+                    // Build arc path as a filled region between two arcs
+                    let arc_path = Path::new(|builder| {
+                        // Start at inner arc beginning
+                        let start_inner = Point::new(
+                            inner_r * start_a.sin(),
+                            -inner_r * start_a.cos(),
+                        );
+                        builder.move_to(start_inner);
+
+                        // Arc along inner radius
+                        let steps = ((end_a - start_a) * 20.0) as usize + 1;
+                        for i in 0..=steps {
+                            let angle = start_a + (end_a - start_a) * (i as f32 / steps as f32);
+                            let point = Point::new(
+                                inner_r * angle.sin(),
+                                -inner_r * angle.cos(),
+                            );
+                            builder.line_to(point);
+                        }
+
+                        // Line to outer arc end
+                        let end_outer = Point::new(
+                            outer_r * end_a.sin(),
+                            -outer_r * end_a.cos(),
+                        );
+                        builder.line_to(end_outer);
+
+                        // Arc back along outer radius
+                        for i in (0..=steps).rev() {
+                            let angle = start_a + (end_a - start_a) * (i as f32 / steps as f32);
+                            let point = Point::new(
+                                outer_r * angle.sin(),
+                                -outer_r * angle.cos(),
+                            );
+                            builder.line_to(point);
+                        }
+
+                        builder.close();
+                    });
+
+                    frame.fill(&arc_path, color);
+
+                    // Draw event name at the midpoint of the arc
+                    if let Some(name) = &event.summary {
+                        let mid_angle = (start_a + end_a) / 2.0;
+                        let text_radius = radius * (EVENT_ARC_INNER_RADIUS + EVENT_ARC_OUTER_RADIUS) / 2.0;
+                        let text_pos = Point::new(
+                            text_radius * mid_angle.sin(),
+                            -text_radius * mid_angle.cos(),
+                        );
+
+                        // Truncate name if too long
+                        let display_name: String = if name.len() > 15 {
+                            format!("{}…", &name[..14])
+                        } else {
+                            name.clone()
+                        };
+
+                        frame.fill_text(canvas::Text {
+                            content: display_name,
+                            position: text_pos,
+                            color: Color::WHITE,
+                            size: iced::Pixels(10.0),
+                            align_x: iced::alignment::Horizontal::Center.into(),
+                            align_y: iced::alignment::Vertical::Center.into(),
+                            ..canvas::Text::default()
+                        });
+                    }
+                }
             }
 
             let hour_hand =
