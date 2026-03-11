@@ -1,8 +1,8 @@
-use iced::{executor, mouse, window};
-use iced::widget::canvas::{stroke, Cache, Geometry, LineCap, Path, Stroke, Event, event};
+use iced::{mouse, window, Task};
+use iced::widget::canvas::{stroke, Cache, Geometry, LineCap, Path, Stroke};
 use iced::widget::{canvas, container};
 use iced::{
-    Application, Color, Command, Element, Length, Point, Rectangle, Renderer, Settings,
+    Color, Element, Length, Point, Rectangle, Renderer,
     Subscription, Theme, Vector,
 };
 use chrono::prelude::*;
@@ -25,17 +25,20 @@ const CLOCK_FACE_REGION : CircularRegion = { CircularRegion {
     outer_radius: CLOCK_FACE_RADIUS,
 } };
 
-pub fn main() -> iced::Result {
-    Clock::run(Settings {
-        antialiasing: true,
-        window: window::Settings {
-            resizable: false,
-            decorations: false,
-            ..window::Settings::default()
-        },
-        ..Settings::default()
-    })
+fn main() -> iced::Result {
+    let window_settings = window::Settings {
+        resizable: false,
+        decorations: false,
+        ..window::Settings::default()
+    };
+
+    iced::application(Clock::new, Clock::update, Clock::view)
+        .subscription(Clock::subscription)
+        .antialiasing(true)
+        .window(window_settings)
+        .run()
 }
+
 
 struct Clock {
     now: DateTime<Local>,
@@ -55,27 +58,18 @@ fn hours_and_minutes(time_float: f32) -> (u8, u8) {
     (time_float as u8, ((time_float - (time_float as u8) as f32) * 60.0) as u8)
 }
 
-impl Application for Clock {
-    type Executor = executor::Default;
-    type Message = ClockMessage;
-    type Theme = Theme;
-    type Flags = ();
-
-    fn new(_flags: ()) -> (Self, Command<ClockMessage>) {
+impl Clock {
+    fn new() -> (Self, Task<ClockMessage>) {
         (
             Clock {
                 now: Local::now(),
                 clock: Default::default(),
             },
-            window::change_mode(window::Id::MAIN, window::Mode::Fullscreen)
+            window::latest().and_then(|id| window::set_mode(id, window::Mode::Fullscreen))
         )
     }
     
-    fn title(&self) -> String {
-        String::from("Clock")
-    }
-
-    fn update(&mut self, message: ClockMessage) -> Command<ClockMessage> {
+    fn update(&mut self, message: ClockMessage) -> Task<ClockMessage> {
         match message {
             ClockMessage::Tick(local_time) => {
                 let now = local_time;
@@ -96,7 +90,7 @@ impl Application for Clock {
             }
         }
 
-        Command::none()
+        Task::none()
     }
 
     fn view(&self) -> Element<'_, ClockMessage> {
@@ -141,30 +135,30 @@ impl canvas::Program<ClockMessage> for Clock {
     fn update(
         &self,
         _state: &mut Self::State,
-        event: Event,
+        event: &iced::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-    ) -> (event::Status, Option<ClockMessage>) {
+    ) -> Option<canvas::Action<ClockMessage>> {
         match event {
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position() {
                     let radius = bounds.width.min(bounds.height) / 2.0;
                     let cursor_radius = bounds.center().distance(position) / radius;
 
                     if CENTER_BUTTON_REGION.contains(cursor_radius) {
-                        (event::Status::Captured, Some(ClockMessage::CenterClick))
+                        Some(canvas::Action::publish(ClockMessage::CenterClick))
                     } else if CLOCK_FACE_REGION.contains(cursor_radius) {
                         let time_float = unit_from_position(bounds.center(), position, 12);
-                        (event::Status::Captured, Some(ClockMessage::FaceClick(time_float)))
+                        Some(canvas::Action::publish(ClockMessage::FaceClick(time_float)))
                     } else {
                         let time_float = unit_from_position(bounds.center(), position, 12);
-                        (event::Status::Captured, Some(ClockMessage::OuterClick(time_float)))
+                        Some(canvas::Action::publish(ClockMessage::OuterClick(time_float)))
                     }
                 } else {
-                    (event::Status::Ignored, None)
+                    None
                 }
             }
-            _ => (event::Status::Ignored, None),
+            _ => None,
         }
     }
 
@@ -268,7 +262,7 @@ impl canvas::Program<ClockMessage> for Clock {
 }
 
 // Calculate the unit (hour, minute, second) from a position relative to the center
-// Zero is at top dead center
+// Zero is at the top dead center
 fn unit_from_position(center: Point, position: Point, total: u8) -> f32 {
     let relative_x = position.x - center.x;
     let relative_y = -(position.y - center.y);
