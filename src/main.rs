@@ -64,7 +64,10 @@ enum ClockMessage {
 }
 
 fn hours_and_minutes(time_float: f32) -> (u8, u8) {
-    (time_float as u8, ((time_float - (time_float as u8) as f32) * 60.0) as u8)
+    let hours = time_float as u8;
+    let minutes = ((time_float - hours as f32) * 60.0) as u8;
+    // Display 12 instead of 0 for 12 o'clock
+    (if hours == 0 { 12 } else { hours }, minutes)
 }
 
 impl Clock {
@@ -212,10 +215,10 @@ impl canvas::Program<ClockMessage> for Clock {
                     let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                     let radius = bounds.width.min(bounds.height) / 2.0;
                     let cursor_radius = center.distance(position) / radius;
+                    let time_float = unit_from_position(center, position, 12);
 
-                    // Only show tooltip over face or outer regions (not center button)
-                    if !CENTER_BUTTON_REGION.contains(cursor_radius) {
-                        let time_float = unit_from_position(center, position, 12);
+                    // Keep tracking during drag, or show tooltip outside center button
+                    if state.dragging.is_some() || !CENTER_BUTTON_REGION.contains(cursor_radius) {
                         state.cursor_info = Some(CursorInfo {
                             position,
                             time_float,
@@ -235,26 +238,29 @@ impl canvas::Program<ClockMessage> for Clock {
                 Some(canvas::Action::request_redraw())
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if let (Some(drag_state), Some(cursor_info)) = (state.dragging.take(), &state.cursor_info) {
-                    // Use frame-relative center
-                    let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
-                    let radius = bounds.width.min(bounds.height) / 2.0;
-                    let cursor_radius = center.distance(cursor_info.position) / radius;
+                if let Some(drag_state) = state.dragging.take() {
+                    if let Some(position) = cursor.position_in(bounds) {
+                        // Use frame-relative center
+                        let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
+                        let radius = bounds.width.min(bounds.height) / 2.0;
+                        let cursor_radius = center.distance(position) / radius;
 
-                    let end_region = if CLOCK_FACE_REGION.contains(cursor_radius) {
-                        ClickRegion::Face
+                        let end_region = if CLOCK_FACE_REGION.contains(cursor_radius) {
+                            ClickRegion::Face
+                        } else {
+                            ClickRegion::Outer
+                        };
+                        let message = ClockMessage::Click {
+                            start_region: drag_state.start_region,
+                            end_region,
+                            start_time: drag_state.start_time,
+                            end_time: unit_from_position(center, position, 12),
+                        };
+                        Some(canvas::Action::publish(message))
                     } else {
-                        ClickRegion::Outer
-                    };
-                    let message = ClockMessage::Click {
-                        start_region: drag_state.start_region,
-                        end_region,
-                        start_time: drag_state.start_time,
-                        end_time: cursor_info.time_float,
-                    };
-                    Some(canvas::Action::publish(message))
+                        None
+                    }
                 } else {
-                    state.dragging = None;
                     None
                 }
             }
@@ -418,11 +424,11 @@ impl canvas::Program<ClockMessage> for Clock {
                 let radius = bounds.width.min(bounds.height) / 2.0;
                 let cursor_radius = center.distance(position) / radius;
 
-                if CENTER_BUTTON_REGION.contains(cursor_radius) {
-                    mouse::Interaction::Crosshair
-                } else if state.dragging.is_some() {
-                    // Arrow/pointer while dragging
+                if state.dragging.is_some() {
+                    // Arrow/pointer while dragging (takes priority)
                     mouse::Interaction::Pointer
+                } else if CENTER_BUTTON_REGION.contains(cursor_radius) {
+                    mouse::Interaction::Crosshair
                 } else {
                     // Crosshair when hovering over face or outer areas
                     mouse::Interaction::Crosshair
