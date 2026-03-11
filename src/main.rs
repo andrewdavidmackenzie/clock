@@ -34,6 +34,23 @@ const CLOCK_FACE_REGION : CircularRegion = { CircularRegion {
     outer_radius: CLOCK_FACE_RADIUS,
 } };
 
+/// Calculate the top-left origin of the exit button given the center point
+fn exit_button_origin(center: Point) -> Point {
+    Point::new(
+        center.x - EXIT_BUTTON_WIDTH / 2.0,
+        center.y - EXIT_BUTTON_HEIGHT / 2.0 + EXIT_BUTTON_Y_OFFSET,
+    )
+}
+
+/// Check if a position is within the exit button bounds
+fn exit_button_contains(center: Point, position: Point) -> bool {
+    let origin = exit_button_origin(center);
+    position.x >= origin.x
+        && position.x <= origin.x + EXIT_BUTTON_WIDTH
+        && position.y >= origin.y
+        && position.y <= origin.y + EXIT_BUTTON_HEIGHT
+}
+
 fn main() -> iced::Result {
     let window_settings = window::Settings {
         resizable: false,
@@ -237,14 +254,7 @@ impl canvas::Program<ClockMessage> for Clock {
 
                     // Check if menu is open and click is on Exit button
                     if self.menu_open {
-                        let button_x = center.x - EXIT_BUTTON_WIDTH / 2.0;
-                        let button_y = center.y - EXIT_BUTTON_HEIGHT / 2.0 + EXIT_BUTTON_Y_OFFSET;
-
-                        if position.x >= button_x
-                            && position.x <= button_x + EXIT_BUTTON_WIDTH
-                            && position.y >= button_y
-                            && position.y <= button_y + EXIT_BUTTON_HEIGHT
-                        {
+                        if exit_button_contains(center, position) {
                             // Track press, exit triggers on release (allows drag-away to cancel)
                             state.exit_button_pressed = true;
                             return Some(canvas::Action::request_redraw());
@@ -318,14 +328,7 @@ impl canvas::Program<ClockMessage> for Clock {
                         // Check if still inside button on release
                         if let Some(position) = cursor.position_in(bounds) {
                             let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
-                            let button_x = center.x - EXIT_BUTTON_WIDTH / 2.0;
-                            let button_y = center.y - EXIT_BUTTON_HEIGHT / 2.0 + EXIT_BUTTON_Y_OFFSET;
-
-                            if position.x >= button_x
-                                && position.x <= button_x + EXIT_BUTTON_WIDTH
-                                && position.y >= button_y
-                                && position.y <= button_y + EXIT_BUTTON_HEIGHT
-                            {
+                            if exit_button_contains(center, position) {
                                 return Some(canvas::Action::publish(ClockMessage::ExitClick));
                             }
                         }
@@ -528,13 +531,12 @@ impl canvas::Program<ClockMessage> for Clock {
                     ..Stroke::default()
                 });
 
-                // Exit button dimensions
-                let button_x = center.x - EXIT_BUTTON_WIDTH / 2.0;
-                let button_y = center.y - EXIT_BUTTON_HEIGHT / 2.0 + EXIT_BUTTON_Y_OFFSET;
+                // Exit button
+                let button_origin = exit_button_origin(center);
 
                 // Draw Exit button background
                 let button_bg = Path::rounded_rectangle(
-                    Point::new(button_x, button_y),
+                    button_origin,
                     iced::Size::new(EXIT_BUTTON_WIDTH, EXIT_BUTTON_HEIGHT),
                     6.0.into(),
                 );
@@ -543,7 +545,7 @@ impl canvas::Program<ClockMessage> for Clock {
                 // Draw Exit button text
                 frame.fill_text(canvas::Text {
                     content: String::from("Exit"),
-                    position: Point::new(center.x - 18.0, button_y + 10.0),
+                    position: Point::new(center.x - 18.0, button_origin.y + 10.0),
                     color: Color::WHITE,
                     size: iced::Pixels(18.0),
                     ..canvas::Text::default()
@@ -570,14 +572,7 @@ impl canvas::Program<ClockMessage> for Clock {
 
                 // Check if hovering over Exit button when menu is open
                 if self.menu_open {
-                    let button_x = center.x - EXIT_BUTTON_WIDTH / 2.0;
-                    let button_y = center.y - EXIT_BUTTON_HEIGHT / 2.0 + EXIT_BUTTON_Y_OFFSET;
-
-                    if position.x >= button_x
-                        && position.x <= button_x + EXIT_BUTTON_WIDTH
-                        && position.y >= button_y
-                        && position.y <= button_y + EXIT_BUTTON_HEIGHT
-                    {
+                    if exit_button_contains(center, position) {
                         return mouse::Interaction::Pointer;
                     }
                     return mouse::Interaction::default();
