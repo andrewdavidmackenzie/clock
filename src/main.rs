@@ -70,7 +70,7 @@ fn event_color(index: usize) -> Color {
     colors[index % colors.len()]
 }
 
-const CENTER_BUTTON_RADIUS: f32 = 0.05;
+const CENTER_BUTTON_RADIUS: f32 = 0.06;
 const EXIT_BUTTON_WIDTH: f32 = 120.0;
 const EXIT_BUTTON_HEIGHT: f32 = 36.0;
 const EXIT_BUTTON_Y_OFFSET: f32 = 40.0;
@@ -79,17 +79,17 @@ const LOGIN_BUTTON_HEIGHT: f32 = 36.0;
 const LOGIN_BUTTON_Y_OFFSET: f32 = -5.0;
 const MODAL_WIDTH: f32 = 280.0;
 const MODAL_HEIGHT: f32 = 240.0;
-const HOUR_HAND_RADIUS: f32 = 0.5;
-const MINUTE_HAND_RADIUS: f32 = 0.65;
-const SECOND_HAND_RADIUS: f32 = 0.70;
-const CLOCK_FACE_RADIUS: f32 = 0.75;
+const HOUR_HAND_RADIUS: f32 = 0.6;
+const MINUTE_HAND_RADIUS: f32 = 0.78;
+const SECOND_HAND_RADIUS: f32 = 0.83;
+const CLOCK_FACE_RADIUS: f32 = 0.88;
 
-const TICK_OUTER_RADIUS: f32 = 0.72;
-const HOUR_TICK_INNER_RADIUS: f32 = 0.63;
-const QUARTER_TICK_INNER_RADIUS: f32 = 0.58;
+const TICK_OUTER_RADIUS: f32 = 0.85;
+const HOUR_TICK_INNER_RADIUS: f32 = 0.76;
+const QUARTER_TICK_INNER_RADIUS: f32 = 0.71;
 
-// Event arc constants - drawn outside the clock face
-const EVENT_ARC_INNER_RADIUS: f32 = 0.78;
+// Event arc constants - drawn outside the clock face (thin band)
+const EVENT_ARC_INNER_RADIUS: f32 = 0.90;
 const EVENT_ARC_OUTER_RADIUS: f32 = 0.98;
 
 const CENTER_BUTTON_REGION : CircularRegion = { CircularRegion {
@@ -781,7 +781,7 @@ impl canvas::Program<ClockMessage> for Clock {
                     if let Some(name) = &event.summary {
                         let text_radius = radius * (EVENT_ARC_INNER_RADIUS + EVENT_ARC_OUTER_RADIUS) / 2.0;
                         let arc_span = end_a - start_a;
-                        let font_size = 14.0;
+                        let font_size = 12.0;
                         let char_width = font_size * 0.6; // Approximate character width
 
                         // Calculate how many characters fit
