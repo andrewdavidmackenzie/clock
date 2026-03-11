@@ -48,6 +48,7 @@ fn main() -> iced::Result {
 struct Clock {
     now: DateTime<Local>,
     clock: Cache,
+    menu_open: bool,
 }
 
 /// Messages handled by the [Clock] Application
@@ -55,6 +56,7 @@ struct Clock {
 enum ClockMessage {
     Tick(DateTime<Local>),
     CenterClick,
+    ExitClick,
     Click {
         start_region: ClickRegion,
         end_region: ClickRegion,
@@ -103,6 +105,7 @@ impl Clock {
             Clock {
                 now: Local::now(),
                 clock: Default::default(),
+                menu_open: false,
             },
             Task::none()
         )
@@ -118,7 +121,12 @@ impl Clock {
                     self.clock.clear();
                 }
             }
-            ClockMessage::CenterClick => {std::process::exit(0)}
+            ClockMessage::CenterClick => {
+                self.menu_open = !self.menu_open;
+            }
+            ClockMessage::ExitClick => {
+                std::process::exit(0);
+            }
             ClockMessage::Click { start_region, end_region, start_time, end_time } => {
                 let (start_h, start_m) = hours_and_minutes(start_time);
                 let (end_h, end_m) = hours_and_minutes(end_time);
@@ -218,6 +226,24 @@ impl canvas::Program<ClockMessage> for Clock {
                     let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                     let radius = bounds.width.min(bounds.height) / 2.0;
                     let cursor_radius = center.distance(position) / radius;
+
+                    // Check if menu is open and click is on Exit button
+                    if self.menu_open {
+                        let button_width = 120.0;
+                        let button_height = 36.0;
+                        let button_x = center.x - button_width / 2.0;
+                        let button_y = center.y - button_height / 2.0 + 10.0;
+
+                        if position.x >= button_x
+                            && position.x <= button_x + button_width
+                            && position.y >= button_y
+                            && position.y <= button_y + button_height
+                        {
+                            return Some(canvas::Action::publish(ClockMessage::ExitClick));
+                        }
+                        // Click outside button closes menu
+                        return Some(canvas::Action::publish(ClockMessage::CenterClick));
+                    }
 
                     if CENTER_BUTTON_REGION.contains(cursor_radius) {
                         Some(canvas::Action::publish(ClockMessage::CenterClick))
@@ -437,6 +463,58 @@ impl canvas::Program<ClockMessage> for Clock {
                 });
             });
             geometries.push(tooltip);
+        }
+
+        // Draw menu popup if open
+        if self.menu_open {
+            let menu = canvas::Cache::default().draw(renderer, bounds.size(), |frame| {
+                let center = frame.center();
+
+                // Modal dimensions
+                let modal_width = 200.0;
+                let modal_height = 100.0;
+                let modal_x = center.x - modal_width / 2.0;
+                let modal_y = center.y - modal_height / 2.0;
+
+                // Draw modal background with rounded corners
+                let modal_bg = Path::rounded_rectangle(
+                    Point::new(modal_x, modal_y),
+                    iced::Size::new(modal_width, modal_height),
+                    12.0.into(),
+                );
+                frame.fill(&modal_bg, Color::from_rgba8(40, 40, 40, 0.9));
+
+                // Draw border
+                frame.stroke(&modal_bg, Stroke {
+                    width: 2.0,
+                    style: stroke::Style::Solid(Color::from_rgb8(100, 100, 100)),
+                    ..Stroke::default()
+                });
+
+                // Exit button dimensions
+                let button_width = 120.0;
+                let button_height = 36.0;
+                let button_x = center.x - button_width / 2.0;
+                let button_y = center.y - button_height / 2.0 + 10.0;
+
+                // Draw Exit button background
+                let button_bg = Path::rounded_rectangle(
+                    Point::new(button_x, button_y),
+                    iced::Size::new(button_width, button_height),
+                    6.0.into(),
+                );
+                frame.fill(&button_bg, Color::from_rgb8(180, 60, 60));
+
+                // Draw Exit button text
+                frame.fill_text(canvas::Text {
+                    content: String::from("Exit"),
+                    position: Point::new(center.x - 18.0, button_y + 10.0),
+                    color: Color::WHITE,
+                    size: iced::Pixels(18.0),
+                    ..canvas::Text::default()
+                });
+            });
+            geometries.push(menu);
         }
 
         geometries
