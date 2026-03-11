@@ -943,7 +943,8 @@ impl canvas::Program<ClockMessage> for Clock {
 
         let mut geometries = vec![clock];
 
-        // Draw tooltip when cursor is over face or outer regions
+        // Draw tooltip when cursor is over face or outer regions (but not when hovering an event)
+        if state.hovered_event.is_none() {
         if let Some(cursor_info) = &state.cursor_info {
             let (hours, minutes) = hours_and_minutes(cursor_info.time_float);
             let period = next_occurrence_period(cursor_info.time_float, &self.now);
@@ -976,6 +977,7 @@ impl canvas::Program<ClockMessage> for Clock {
                 });
             });
             geometries.push(tooltip);
+        }
         }
 
         // Draw event hover tooltip
