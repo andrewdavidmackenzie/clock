@@ -267,6 +267,13 @@ impl canvas::Program<ClockMessage> for Clock {
                 }
             }
             iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                // Suppress hover/tooltip when menu is open
+                if self.menu_open {
+                    state.cursor_info = None;
+                    state.dragging = None;
+                    return Some(canvas::Action::request_redraw());
+                }
+
                 if let Some(position) = cursor.position_in(bounds) {
                     // Use frame-relative center (position_in returns frame-relative coords)
                     let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
@@ -295,6 +302,12 @@ impl canvas::Program<ClockMessage> for Clock {
                 Some(canvas::Action::request_redraw())
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                // Suppress drag completion when menu is open
+                if self.menu_open {
+                    state.dragging = None;
+                    return None;
+                }
+
                 if let Some(drag_state) = state.dragging.take() {
                     if let Some(position) = cursor.position_in(bounds) {
                         // Use frame-relative center
