@@ -125,7 +125,7 @@ impl Clock {
                 self.menu_open = !self.menu_open;
             }
             ClockMessage::ExitClick => {
-                std::process::exit(0);
+                return iced::exit();
             }
             ClockMessage::Click { start_region, end_region, start_time, end_time } => {
                 let (start_h, start_m) = hours_and_minutes(start_time);
