@@ -1,6 +1,6 @@
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-    PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
+    PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl, AuthType,
     basic::BasicClient,
     reqwest::http_client,
 };
@@ -16,9 +16,10 @@ const GOOGLE_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo
 const GOOGLE_CALENDAR_EVENTS_URL: &str = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const REDIRECT_PORT: u16 = 8085;
 
-// Default OAuth client ID for the clock app (can be overridden via GOOGLE_CLIENT_ID env var)
+// OAuth credentials for the clock app
 // To create your own: Google Cloud Console -> APIs & Services -> Credentials -> Create OAuth client ID -> Desktop app
-const DEFAULT_CLIENT_ID: &str = "95536384409-hrd7nebrgggunk7ccbc7nvsji4qr3vo3.apps.googleusercontent.com";
+const CLIENT_ID: &str = "95536384409-hrd7nebrgggunk7ccbc7nvsji4qr3vo3.apps.googleusercontent.com";
+const CLIENT_SECRET: &str = "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";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserInfo {
@@ -54,31 +55,15 @@ struct StoredTokens {
 }
 
 #[derive(Debug, Clone)]
-pub struct GoogleAuth {
-    client_id: String,
-    client_secret: Option<String>,
-}
+pub struct GoogleAuth;
 
 impl GoogleAuth {
     pub fn new() -> Option<Self> {
-        // Try env var first, fall back to embedded default
-        let client_id = std::env::var("GOOGLE_CLIENT_ID")
-            .ok()
-            .or_else(|| {
-                if DEFAULT_CLIENT_ID.is_empty() {
-                    None
-                } else {
-                    Some(DEFAULT_CLIENT_ID.to_string())
-                }
-            })?;
-
-        // Client secret is optional for native apps using PKCE
-        let client_secret = std::env::var("GOOGLE_CLIENT_SECRET").ok();
-
-        Some(Self {
-            client_id,
-            client_secret,
-        })
+        if CLIENT_ID.is_empty() {
+            None
+        } else {
+            Some(Self)
+        }
     }
 
     fn get_token_path() -> PathBuf {
@@ -90,14 +75,15 @@ impl GoogleAuth {
 
     fn create_client(&self) -> BasicClient {
         BasicClient::new(
-            ClientId::new(self.client_id.clone()),
-            self.client_secret.as_ref().map(|s| ClientSecret::new(s.clone())),
+            ClientId::new(CLIENT_ID.to_string()),
+            Some(ClientSecret::new(CLIENT_SECRET.to_string())),
             AuthUrl::new(GOOGLE_AUTH_URL.to_string()).unwrap(),
             Some(TokenUrl::new(GOOGLE_TOKEN_URL.to_string()).unwrap()),
         )
         .set_redirect_uri(
-            RedirectUrl::new(format!("http://localhost:{}", REDIRECT_PORT)).unwrap(),
+            RedirectUrl::new(format!("http://127.0.0.1:{}", REDIRECT_PORT)).unwrap(),
         )
+        .set_auth_type(AuthType::RequestBody)
     }
 
     pub fn start_login(&self) -> Result<(String, PkceCodeVerifier), String> {
@@ -120,8 +106,6 @@ impl GoogleAuth {
     pub fn wait_for_callback(&self, pkce_verifier: PkceCodeVerifier) -> Result<String, String> {
         let listener = TcpListener::bind(format!("127.0.0.1:{}", REDIRECT_PORT))
             .map_err(|e| format!("Failed to bind to port {}: {}", REDIRECT_PORT, e))?;
-
-        println!("Waiting for OAuth callback on port {}...", REDIRECT_PORT);
 
         let (mut stream, _) = listener
             .accept()
