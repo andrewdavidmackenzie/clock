@@ -137,29 +137,31 @@ impl GoogleAuth {
             .read_line(&mut request_line)
             .map_err(|e| format!("Failed to read request: {}", e))?;
 
-        // Parse query parameters from the callback URL
-        let query_string = request_line
+        // Parse the callback URL using a proper URL parser
+        let path = request_line
             .split_whitespace()
             .nth(1)
-            .and_then(|path| path.split('?').nth(1))
             .ok_or("Failed to parse callback URL")?;
 
-        let mut code = None;
-        let mut state = None;
+        // Construct full URL for parsing (path is relative, so add a base)
+        let full_url = format!("http://localhost{}", path);
+        let parsed_url = url::Url::parse(&full_url)
+            .map_err(|e| format!("Failed to parse callback URL: {}", e))?;
 
-        for param in query_string.split('&') {
-            let mut parts = param.split('=');
-            match parts.next() {
-                Some("code") => code = parts.next().map(|s| s.to_string()),
-                Some("state") => state = parts.next().map(|s| s.to_string()),
-                _ => {}
-            }
-        }
+        // Extract query parameters with proper URL decoding
+        let params: std::collections::HashMap<_, _> = parsed_url.query_pairs().collect();
 
-        let code = code.ok_or("Failed to extract authorization code")?;
+        let code = params
+            .get("code")
+            .map(|s| s.to_string())
+            .ok_or("Failed to extract authorization code")?;
 
         // Validate CSRF state
-        let state = state.ok_or("Missing state parameter in callback")?;
+        let state = params
+            .get("state")
+            .map(|s| s.to_string())
+            .ok_or("Missing state parameter in callback")?;
+
         if state != *expected_state.secret() {
             return Err("Invalid state parameter - possible CSRF attack".to_string());
         }
