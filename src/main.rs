@@ -391,7 +391,11 @@ impl canvas::Program<ClockMessage> for Clock {
                             state.exit_button_pressed = true;
                             return Some(canvas::Action::request_redraw());
                         }
-                        if login_button_contains(center, position) && !self.login_in_progress {
+                        // Only arm login button if auth is configured and not in progress
+                        if login_button_contains(center, position)
+                            && self.google_auth.is_some()
+                            && !self.login_in_progress
+                        {
                             // Track press for login/logout button
                             state.login_button_pressed = true;
                             return Some(canvas::Action::request_redraw());
@@ -473,10 +477,10 @@ impl canvas::Program<ClockMessage> for Clock {
                     }
                     if state.login_button_pressed {
                         state.login_button_pressed = false;
-                        // Check if still inside button on release
+                        // Check if still inside button on release and auth is configured
                         if let Some(position) = cursor.position_in(bounds) {
                             let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
-                            if login_button_contains(center, position) {
+                            if login_button_contains(center, position) && self.google_auth.is_some() {
                                 // Determine if this is login or logout based on current state
                                 let message = if self.user_info.is_some() {
                                     ClockMessage::LogoutClick
