@@ -193,9 +193,11 @@ impl canvas::Program<ClockMessage> for Clock {
             };
 
             frame.with_save(|frame| {
-                let hour = self.now.naive_local().time().hour() as f32;
-                let minute = self.now.naive_local().time().minute() as f32;
-                let hour_with_minutes = hour + (minute / 60.0);
+                let time = self.now.naive_local().time();
+                let hour = (time.hour() % 12) as f32;
+                let minute = time.minute() as f32;
+                let second = time.second() as f32;
+                let hour_with_minutes = hour + (minute / 60.0) + (second / 3_600.0);
                 frame.rotate(2.0 * PI * hour_with_minutes / 12.0);
                 frame.stroke(&hour_hand, hour_width());
             });
