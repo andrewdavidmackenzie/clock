@@ -99,7 +99,7 @@ impl Application for Clock {
         Command::none()
     }
 
-    fn view(&self) -> Element<ClockMessage> {
+    fn view(&self) -> Element<'_, ClockMessage> {
         let canvas = canvas(self)
             .width(Length::Fill)
             .height(Length::Fill);
