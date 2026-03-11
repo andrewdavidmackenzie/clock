@@ -70,6 +70,33 @@ fn hours_and_minutes(time_float: f32) -> (u8, u8) {
     (if hours == 0 { 12 } else { hours }, minutes)
 }
 
+/// Determine if clicked time should be AM or PM based on next occurrence after current time
+fn next_occurrence_period(time_float: f32, current_time: &DateTime<Local>) -> &'static str {
+    let clicked_hour = time_float as u8; // 0-11 internally
+    let clicked_minutes = ((time_float - clicked_hour as f32) * 60.0) as u8;
+
+    let current_hour = current_time.hour() as u8; // 0-23
+    let current_minutes = current_time.minute() as u8;
+
+    // Convert to minutes since midnight for comparison
+    let current_total_mins = current_hour as u16 * 60 + current_minutes as u16;
+
+    // AM candidate: clicked_hour (0-11) represents 12AM, 1AM, ..., 11AM
+    let am_total_mins = clicked_hour as u16 * 60 + clicked_minutes as u16;
+    // PM candidate: clicked_hour + 12 (12-23) represents 12PM, 1PM, ..., 11PM
+    let pm_total_mins = (clicked_hour as u16 + 12) * 60 + clicked_minutes as u16;
+
+    // Find which comes next after current time
+    if pm_total_mins > current_total_mins {
+        "PM"
+    } else if am_total_mins > current_total_mins {
+        "AM"
+    } else {
+        // Both have passed today, so AM tomorrow is next
+        "AM"
+    }
+}
+
 impl Clock {
     fn new() -> (Self, Task<ClockMessage>) {
         (
@@ -95,13 +122,16 @@ impl Clock {
             ClockMessage::Click { start_region, end_region, start_time, end_time } => {
                 let (start_h, start_m) = hours_and_minutes(start_time);
                 let (end_h, end_m) = hours_and_minutes(end_time);
+                let start_period = next_occurrence_period(start_time, &self.now);
+                let end_period = next_occurrence_period(end_time, &self.now);
                 let drag_type = match (start_region, end_region) {
                     (ClickRegion::Face, ClickRegion::Face) => "Face",
                     (ClickRegion::Outer, ClickRegion::Outer) => "Outer",
                     (ClickRegion::Face, ClickRegion::Outer) => "Drag-Out",
                     (ClickRegion::Outer, ClickRegion::Face) => "Drag-In",
                 };
-                println!("{} {:02}:{:02} - {:02}:{:02}", drag_type, start_h, start_m, end_h, end_m);
+                println!("{} {:02}:{:02} {} - {:02}:{:02} {}",
+                    drag_type, start_h, start_m, start_period, end_h, end_m, end_period);
             }
         }
 
@@ -376,13 +406,14 @@ impl canvas::Program<ClockMessage> for Clock {
 
         // Draw tooltip when cursor is over face or outer regions
         if let Some(cursor_info) = &state.cursor_info {
-            let tooltip = canvas::Cache::default().draw(renderer, bounds.size(), |frame| {
-                let (hours, minutes) = hours_and_minutes(cursor_info.time_float);
-                let time_text = format!("{:02}:{:02}", hours, minutes);
+            let (hours, minutes) = hours_and_minutes(cursor_info.time_float);
+            let period = next_occurrence_period(cursor_info.time_float, &self.now);
+            let time_text = format!("{:02}:{:02} {}", hours, minutes, period);
 
+            let tooltip = canvas::Cache::default().draw(renderer, bounds.size(), |frame| {
                 let font_size = 16.0;
                 let padding = 4.0;
-                let text_width = 42.0; // Approximate width for "HH:MM" at 16px
+                let text_width = 62.0; // Approximate width for "HH:MM AM" at 16px
                 let text_height = font_size;
 
                 // Position tooltip near cursor with offset
