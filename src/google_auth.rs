@@ -313,4 +313,36 @@ impl GoogleAuth {
 
         Ok(events_response.items.and_then(|items| items.into_iter().next()))
     }
+
+    /// Get calendar events for the next 12 hours
+    pub fn get_upcoming_events(&self, access_token: &str) -> Result<Vec<CalendarEvent>, String> {
+        let client = reqwest::blocking::Client::new();
+
+        let now = chrono::Utc::now();
+        let time_min = now.to_rfc3339();
+        let time_max = (now + chrono::Duration::hours(12)).to_rfc3339();
+
+        let response = client
+            .get(GOOGLE_CALENDAR_EVENTS_URL)
+            .bearer_auth(access_token)
+            .query(&[
+                ("maxResults", "50"),
+                ("orderBy", "startTime"),
+                ("singleEvents", "true"),
+                ("timeMin", &time_min),
+                ("timeMax", &time_max),
+            ])
+            .send()
+            .map_err(|e| format!("Failed to get calendar events: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("Calendar request failed: {}", response.status()));
+        }
+
+        let events_response: CalendarEventsResponse = response
+            .json()
+            .map_err(|e| format!("Failed to parse calendar response: {}", e))?;
+
+        Ok(events_response.items.unwrap_or_default())
+    }
 }
