@@ -371,6 +371,7 @@ impl Clock {
                     }
                     Err(e) => {
                         eprintln!("Login failed: {}", e);
+                        self.menu_open = false; // Close modal on login failure
                         self.clock.clear();
                     }
                 }
